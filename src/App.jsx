@@ -312,6 +312,19 @@ export default function TheOar() {
     setFoodLogs(prev => [entry, ...prev]);
   };
 
+  const updateFastStartTime = async (newTimestamp) => {
+    const res = await gapiRequest("GET", `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.FASTS}!A1:A1000`);
+    const allRows = res.values || [];
+    const rowIdx = allRows.findIndex(r => r[0] === String(activeFast.id));
+    if (rowIdx >= 0) {
+      await gapiRequest("PUT",
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.FASTS}!C${rowIdx + 1}?valueInputOption=RAW`,
+        { values: [[String(newTimestamp)]] }
+      );
+    }
+    setActiveFast(prev => ({ ...prev, startTime: newTimestamp }));
+  };
+
   const updateSettings = async (key, value) => {
     await updateSettingValue(sheetId, key, value);
     setSettings(prev => {
@@ -367,7 +380,7 @@ export default function TheOar() {
         <div style={S.content}>
           {tab === "Dashboard" && <Dashboard settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} weekMeters={weekMeters} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} activeFast={activeFast} rows={rows} setTab={setTab} todayWater={todayWater} addWater={addWater} />}
           {tab === "Row" && <RowLog rows={rows} addRow={addRow} />}
-          {tab === "Fast" && <FastTracker activeFast={activeFast} fasts={fasts} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} startFast={startFast} endFast={endFast} />}
+          {tab === "Fast" && <FastTracker activeFast={activeFast} fasts={fasts} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} startFast={startFast} endFast={endFast} updateFastStartTime={updateFastStartTime} />}
           {tab === "Food" && <FoodLog foodLogs={foodLogs} settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} addFood={addFood} todayWater={todayWater} addWater={addWater} />}
           {tab === "Trends" && <Trends rows={rows} fasts={fasts} foodLogs={foodLogs} settings={settings} activeFast={activeFast} />}
         </div>
@@ -520,13 +533,25 @@ function RowLog({ rows, addRow }) {
   );
 }
 
-function FastTracker({ activeFast, fasts, fastElapsed, fastGoal, fastPct, fastDone, startFast, endFast }) {
+function FastTracker({ activeFast, fasts, fastElapsed, fastGoal, fastPct, fastDone, startFast, endFast, updateFastStartTime }) {
   const [starting, setStarting] = useState(false);
   const [ending, setEnding] = useState(false);
   const streak = calcStreak(fasts);
 
   const handleStart = async () => { setStarting(true); await startFast(); setStarting(false); };
   const handleEnd = async () => { setEnding(true); await endFast(); setEnding(false); };
+
+  const startTimeValue = activeFast ? (() => {
+    const d = new Date(activeFast.startTime);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  })() : "";
+
+  const handleStartTimeChange = (e) => {
+    const [h, m] = e.target.value.split(":").map(Number);
+    const d = new Date(activeFast.startTime);
+    d.setHours(h, m, 0, 0);
+    updateFastStartTime(d.getTime());
+  };
 
   return (
     <div style={S.screen}>
@@ -542,7 +567,15 @@ function FastTracker({ activeFast, fasts, fastElapsed, fastGoal, fastPct, fastDo
               {formatDuration(fastElapsed)}
             </div>
             <div style={S.fastTimeRow}>
-              <span>🕐 Started {new Date(activeFast.startTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                🕐 Started
+                <input
+                  type="time"
+                  value={startTimeValue}
+                  onChange={handleStartTimeChange}
+                  style={S.fastTimeInput}
+                />
+              </span>
               <span>🏁 Ends {new Date(activeFast.startTime + fastGoal * 3600000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</span>
             </div>
             <div style={{ ...S.cardSub, textAlign: "center", marginBottom: 12 }}>
@@ -801,6 +834,9 @@ const S = {
   pillGreen: { color: "#4ade80", borderColor: "#166534", background: "#052e16" },
   pillAmber: { color: "#fbbf24", borderColor: "#92400e", background: "#1c1200" },
   pillDim: { color: "#94a3b8", borderColor: "#334155", background: "transparent" },
+
+  fastTimeRow: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9rem", color: "#94a3b8", marginBottom: 8 },
+  fastTimeInput: { background: "transparent", border: "none", borderBottom: "1px solid #475569", color: "#f1f5f9", fontSize: "0.9rem", fontFamily: "inherit", padding: "2px 4px", cursor: "pointer", outline: "none", width: 90 },
 
   waterBtns: { display: "flex", gap: 8, marginTop: 12 },
   waterBtn: { flex: 1, background: "#0d1b2a", border: "1px solid #1e3a5f", borderRadius: 8, padding: "10px 0", color: "#38bdf8", fontSize: "0.85rem", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
