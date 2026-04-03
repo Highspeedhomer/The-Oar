@@ -418,7 +418,7 @@ export default function TheOar() {
           {tab === "Row" && <RowLog rows={rows} addRow={addRow} />}
           {tab === "Fast" && <FastTracker activeFast={activeFast} fasts={fasts} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} startFast={startFast} endFast={endFast} updateFastStartTime={updateFastStartTime} />}
           {tab === "Food" && <FoodLog foodLogs={foodLogs} settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} addFood={addFood} todayWater={todayWater} addWater={addWater} sheetId={sheetId} updateFood={updateFood} deleteFood={deleteFood} waterLogs={waterLogs} updateWater={updateWater} deleteWater={deleteWater} />}
-          {tab === "Trends" && <Trends rows={rows} fasts={fasts} foodLogs={foodLogs} settings={settings} activeFast={activeFast} />}
+          {tab === "Trends" && <Trends rows={rows} fasts={fasts} foodLogs={foodLogs} settings={settings} activeFast={activeFast} waterLogs={waterLogs} />}
           {tab === "Settings" && <SettingsScreen settings={settings} updateSettings={updateSettings} />}
         </div>
 
@@ -877,7 +877,7 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
   );
 }
 
-function Trends({ rows, fasts, foodLogs, settings, activeFast }) {
+function Trends({ rows, fasts, foodLogs, settings, activeFast, waterLogs }) {
   const last7 = getLast7Days();
   const metersByDay = last7.map(d => ({ date: d, val: rows.filter(r => r.date === d).reduce((s, r) => s + r.meters, 0) }));
   const calsByDay = last7.map(d => ({ date: d, val: foodLogs.filter(f => f.date === d).reduce((s, f) => s + f.calories, 0) }));
@@ -897,8 +897,54 @@ function Trends({ rows, fasts, foodLogs, settings, activeFast }) {
   const totalMeters = rows.reduce((s, r) => s + r.meters, 0);
   const streak = calcStreak(fasts);
 
+  // ── This Month ──
+  const now = new Date();
+  const thisYear = now.getFullYear();
+  const thisMonth = now.getMonth();
+  const monthPrefix = `${thisYear}-${String(thisMonth + 1).padStart(2, "0")}-`;
+
+  const monthRows = rows.filter(r => r.date.startsWith(monthPrefix));
+  const monthTotalMeters = monthRows.reduce((s, r) => s + r.meters, 0);
+  const monthDaysRowed = new Set(monthRows.map(r => r.date)).size;
+  const monthAvgMeters = monthDaysRowed > 0 ? Math.round(monthTotalMeters / monthDaysRowed) : 0;
+
+  const monthFasts = fasts.filter(f => {
+    const end = new Date(parseInt(f.endTime));
+    return end.getFullYear() === thisYear && end.getMonth() === thisMonth;
+  });
+  const monthFastsCompleted = monthFasts.filter(f => {
+    const h = (parseInt(f.endTime) - parseInt(f.startTime)) / 3600000;
+    return h >= parseInt(f.goalHours);
+  }).length;
+  const monthAvgFastH = monthFasts.length > 0
+    ? (monthFasts.reduce((s, f) => s + (parseInt(f.endTime) - parseInt(f.startTime)) / 3600000, 0) / monthFasts.length)
+    : 0;
+
+  const monthFoodDays = [...new Set(foodLogs.filter(f => f.date.startsWith(monthPrefix)).map(f => f.date))];
+  const monthAvgCals = monthFoodDays.length > 0
+    ? Math.round(monthFoodDays.reduce((s, d) => s + foodLogs.filter(f => f.date === d).reduce((a, f) => a + f.calories, 0), 0) / monthFoodDays.length)
+    : 0;
+
+  const monthWaterDays = [...new Set((waterLogs || []).filter(w => w.date.startsWith(monthPrefix)).map(w => w.date))];
+  const monthAvgWater = monthWaterDays.length > 0
+    ? Math.round(monthWaterDays.reduce((s, d) => s + (waterLogs || []).filter(w => w.date === d).reduce((a, w) => a + w.oz, 0), 0) / monthWaterDays.length)
+    : 0;
+
+  const monthName = now.toLocaleDateString("en-US", { month: "long" }).toUpperCase();
+
   return (
     <div style={S.screen}>
+      <div style={S.sectionTitle}>THIS MONTH · {monthName}</div>
+      <div style={S.statGrid}>
+        <div style={S.statCard}><div style={S.statVal}>{monthTotalMeters > 0 ? formatMeters(monthTotalMeters) + "m" : "——"}</div><div style={S.statLabel}>METERS ROWED</div></div>
+        <div style={S.statCard}><div style={S.statVal}>{monthDaysRowed > 0 ? monthDaysRowed : "——"}</div><div style={S.statLabel}>DAYS ROWED</div></div>
+        <div style={S.statCard}><div style={S.statVal}>{monthAvgMeters > 0 ? formatMeters(monthAvgMeters) + "m" : "——"}</div><div style={S.statLabel}>AVG / ROW DAY</div></div>
+        <div style={S.statCard}><div style={S.statVal}>{monthFastsCompleted > 0 ? monthFastsCompleted : "——"}</div><div style={S.statLabel}>FASTS DONE</div></div>
+        <div style={S.statCard}><div style={S.statVal}>{monthAvgFastH > 0 ? monthAvgFastH.toFixed(1) + "h" : "——"}</div><div style={S.statLabel}>AVG FAST</div></div>
+        <div style={S.statCard}><div style={S.statVal}>{monthAvgCals > 0 ? monthAvgCals : "——"}</div><div style={S.statLabel}>AVG KCAL / DAY</div></div>
+        <div style={S.statCard}><div style={S.statVal}>{monthAvgWater > 0 ? monthAvgWater + "oz" : "——"}</div><div style={S.statLabel}>AVG WATER / DAY</div></div>
+      </div>
+
       <div style={S.sectionTitle}>TRENDS · 7 DAYS</div>
       <div style={S.statRow}>
         <div style={S.statCard}><div style={S.statVal}>{formatMeters(totalMeters)}m</div><div style={S.statLabel}>ALL TIME</div></div>
@@ -1096,6 +1142,7 @@ const S = {
   listSub: { fontSize: "0.85rem", color: "#94a3b8", marginTop: 3 },
 
   statRow: { display: "flex", gap: 8, marginBottom: 12 },
+  statGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 },
   statCard: { flex: 1, background: "#16161a", border: "1px solid #252530", borderRadius: 10, padding: "12px 8px", textAlign: "center" },
   statVal: { fontSize: "1.3rem", fontWeight: 700, color: "#f1f5f9" },
   statLabel: { fontSize: "0.7rem", letterSpacing: "0.08em", color: "#94a3b8", marginTop: 4 },
