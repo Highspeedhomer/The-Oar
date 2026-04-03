@@ -339,6 +339,42 @@ export default function TheOar() {
     });
   };
 
+  const updateFood = async (entry) => {
+    const res = await gapiRequest("GET", `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.FOOD}!A1:A1000`);
+    const allRows = res.values || [];
+    const rowIdx = allRows.findIndex(r => r[0] === String(entry.id));
+    if (rowIdx >= 0) {
+      await gapiRequest("PUT",
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.FOOD}!A${rowIdx + 1}:G${rowIdx + 1}?valueInputOption=RAW`,
+        { values: [[String(entry.id), entry.date, entry.name, String(entry.calories), String(entry.protein), String(entry.fat), String(entry.carbs)]] }
+      );
+    }
+    setFoodLogs(prev => prev.map(f => String(f.id) === String(entry.id) ? entry : f));
+  };
+
+  const deleteFood = async (id) => {
+    await deleteRowById(sheetId, TABS.FOOD, id);
+    setFoodLogs(prev => prev.filter(f => String(f.id) !== String(id)));
+  };
+
+  const updateWater = async (entry) => {
+    const res = await gapiRequest("GET", `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.WATER}!A1:A1000`);
+    const allRows = res.values || [];
+    const rowIdx = allRows.findIndex(r => r[0] === String(entry.id));
+    if (rowIdx >= 0) {
+      await gapiRequest("PUT",
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.WATER}!A${rowIdx + 1}:C${rowIdx + 1}?valueInputOption=RAW`,
+        { values: [[String(entry.id), entry.date, String(entry.oz)]] }
+      );
+    }
+    setWaterLogs(prev => prev.map(w => String(w.id) === String(entry.id) ? entry : w));
+  };
+
+  const deleteWater = async (id) => {
+    await deleteRowById(sheetId, TABS.WATER, id);
+    setWaterLogs(prev => prev.filter(w => String(w.id) !== String(id)));
+  };
+
   // ── RENDER ──
 
   if (authState !== "ready") {
@@ -381,7 +417,7 @@ export default function TheOar() {
           {tab === "Dashboard" && <Dashboard settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} weekMeters={weekMeters} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} activeFast={activeFast} rows={rows} setTab={setTab} todayWater={todayWater} addWater={addWater} />}
           {tab === "Row" && <RowLog rows={rows} addRow={addRow} />}
           {tab === "Fast" && <FastTracker activeFast={activeFast} fasts={fasts} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} startFast={startFast} endFast={endFast} updateFastStartTime={updateFastStartTime} />}
-          {tab === "Food" && <FoodLog foodLogs={foodLogs} settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} addFood={addFood} todayWater={todayWater} addWater={addWater} />}
+          {tab === "Food" && <FoodLog foodLogs={foodLogs} settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} addFood={addFood} todayWater={todayWater} addWater={addWater} sheetId={sheetId} updateFood={updateFood} deleteFood={deleteFood} waterLogs={waterLogs} updateWater={updateWater} deleteWater={deleteWater} />}
           {tab === "Trends" && <Trends rows={rows} fasts={fasts} foodLogs={foodLogs} settings={settings} activeFast={activeFast} />}
         </div>
 
@@ -401,9 +437,16 @@ export default function TheOar() {
 // ─── SCREENS ──────────────────────────────────────────────────────────────────
 
 function Dashboard({ settings, todayCals, todayProtein, todayFat, todayCarbs, weekMeters, fastElapsed, fastGoal, fastPct, fastDone, activeFast, rows, setTab, todayWater, addWater }) {
+  const [customOz, setCustomOz] = useState("");
   const calPct = Math.min((todayCals / settings.calorieGoal) * 100, 100);
   const todayMeters = rows.filter(r => r.date === todayStr()).reduce((s, r) => s + r.meters, 0);
   const waterPct = Math.min((todayWater / (settings.waterGoal || 100)) * 100, 100);
+  const handleCustomWater = async () => {
+    const oz = parseFloat(customOz);
+    if (!oz || oz <= 0) return;
+    await addWater(oz);
+    setCustomOz("");
+  };
 
   return (
     <div style={S.screen}>
@@ -472,6 +515,10 @@ function Dashboard({ settings, todayCals, todayProtein, todayFat, todayCarbs, we
           {[8, 16, 24, 32].map(oz => (
             <button key={oz} style={S.waterBtn} onClick={e => { e.stopPropagation(); addWater(oz); }}>+{oz}oz</button>
           ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input style={{ ...S.input, flex: 1, padding: "10px 12px" }} type="number" inputMode="decimal" placeholder="custom oz" value={customOz} onChange={e => setCustomOz(e.target.value)} />
+          <button style={{ ...S.waterBtn, flex: 0, padding: "10px 16px", whiteSpace: "nowrap" }} onClick={e => { e.stopPropagation(); handleCustomWater(); }}>ADD</button>
         </div>
       </div>
     </div>
@@ -620,7 +667,7 @@ function FastTracker({ activeFast, fasts, fastElapsed, fastGoal, fastPct, fastDo
   );
 }
 
-function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayCarbs, addFood, todayWater, addWater }) {
+function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayCarbs, addFood, todayWater, addWater, sheetId, updateFood, deleteFood, waterLogs, updateWater, deleteWater }) {
   const [name, setName] = useState("");
   const [cals, setCals] = useState("");
   const [protein, setProtein] = useState("");
@@ -628,6 +675,10 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
   const [carbs, setCarbs] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [customOz, setCustomOz] = useState("");
+  const [editFood, setEditFood] = useState(null);
+  const [editWater, setEditWater] = useState(null);
+  const [modalSaving, setModalSaving] = useState(false);
 
   const submit = async () => {
     const c = parseInt(cals);
@@ -640,81 +691,182 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
     setTimeout(() => setSaved(false), 2000);
   };
 
+  const handleCustomWater = async () => {
+    const oz = parseFloat(customOz);
+    if (!oz || oz <= 0) return;
+    await addWater(oz);
+    setCustomOz("");
+  };
+
+  const handleSaveFood = async () => {
+    if (!editFood.name) return;
+    setModalSaving(true);
+    await updateFood(editFood);
+    setModalSaving(false);
+    setEditFood(null);
+  };
+
+  const handleDeleteFood = async () => {
+    setModalSaving(true);
+    await deleteFood(editFood.id);
+    setModalSaving(false);
+    setEditFood(null);
+  };
+
+  const handleSaveWater = async () => {
+    if (!editWater.oz) return;
+    setModalSaving(true);
+    await updateWater(editWater);
+    setModalSaving(false);
+    setEditWater(null);
+  };
+
+  const handleDeleteWater = async () => {
+    setModalSaving(true);
+    await deleteWater(editWater.id);
+    setModalSaving(false);
+    setEditWater(null);
+  };
+
   const calPct = Math.min((todayCals / settings.calorieGoal) * 100, 100);
   const todayItems = foodLogs.filter(f => f.date === todayStr());
+  const todayWaterItems = (waterLogs || []).filter(w => w.date === todayStr());
 
   return (
-    <div style={S.screen}>
-      <div style={S.sectionTitle}>🥩 FOOD LOG</div>
-      <div style={S.card}>
-        <div style={S.cardHeader}>
-          <span style={S.cardLabel}>TODAY</span>
-          <span style={S.cardLabelRight}>{todayCals} / {settings.calorieGoal} kcal</span>
-        </div>
-        <ProgressBar pct={calPct} color={calPct > 100 ? "#f87171" : "#38bdf8"} />
-        <div style={S.macroRow}>
-          <MacroPill label="P" val={todayProtein} goal={settings.macroGoals.protein} color="#a78bfa" />
-          <MacroPill label="F" val={todayFat} goal={settings.macroGoals.fat} color="#fb923c" />
-          <MacroPill label="C" val={todayCarbs} goal={settings.macroGoals.carbs} color="#34d399" />
-        </div>
-      </div>
-
-      <div style={S.card}>
-        <div style={S.cardHeader}>
-          <span style={S.cardLabel}>💧 WATER</span>
-          <span style={S.cardLabelRight}>{todayWater} / {settings.waterGoal || 100} oz</span>
-        </div>
-        <ProgressBar pct={Math.min((todayWater / (settings.waterGoal || 100)) * 100, 100)} color={todayWater >= (settings.waterGoal || 100) ? "#4ade80" : "#38bdf8"} />
-        <div style={S.waterBtns}>
-          {[8, 16, 24, 32].map(oz => (
-            <button key={oz} style={S.waterBtn} onClick={() => addWater(oz)}>+{oz}oz</button>
-          ))}
-        </div>
-      </div>
-
-      <div style={S.sectionTitle}>🥩 ADD FOOD</div>
-      <div style={S.card}>
-        <div style={S.inputGroup}>
-          <label style={S.inputLabel}>FOOD NAME</label>
-          <input style={S.input} type="text" placeholder="Chicken breast, eggs..." value={name} onChange={e => setName(e.target.value)} />
-        </div>
-        <div style={S.twoCol}>
-          <div style={S.inputGroup}>
-            <label style={S.inputLabel}>CALORIES</label>
-            <input style={S.input} type="number" placeholder="kcal" value={cals} onChange={e => setCals(e.target.value)} inputMode="numeric" />
-          </div>
-          <div style={S.inputGroup}>
-            <label style={S.inputLabel}>PROTEIN (g)</label>
-            <input style={S.input} type="number" placeholder="g" value={protein} onChange={e => setProtein(e.target.value)} inputMode="numeric" />
-          </div>
-        </div>
-        <div style={S.twoCol}>
-          <div style={S.inputGroup}>
-            <label style={S.inputLabel}>FAT (g)</label>
-            <input style={S.input} type="number" placeholder="g" value={fat} onChange={e => setFat(e.target.value)} inputMode="numeric" />
-          </div>
-          <div style={S.inputGroup}>
-            <label style={S.inputLabel}>CARBS (g)</label>
-            <input style={S.input} type="number" placeholder="g" value={carbs} onChange={e => setCarbs(e.target.value)} inputMode="numeric" />
-          </div>
-        </div>
-        <button style={{ ...S.btn, ...(saved ? S.btnSuccess : {}) }} onClick={submit} disabled={saving}>
-          {saving ? "SAVING..." : saved ? "✓ LOGGED" : "ADD ENTRY"}
-        </button>
-      </div>
-
-      {todayItems.length > 0 && (
-        <>
-          <div style={S.sectionTitle}>TODAY'S ENTRIES</div>
-          {todayItems.map(f => (
-            <div key={f.id} style={S.listItem}>
-              <div style={S.listMain}>{f.name}</div>
-              <div style={S.listSub}>{f.calories} kcal · P:{f.protein}g F:{f.fat}g C:{f.carbs}g</div>
+    <>
+      {editFood && (
+        <div style={S.modalOverlay} onClick={() => setEditFood(null)}>
+          <div style={S.modal} onClick={e => e.stopPropagation()}>
+            <div style={S.modalTitle}>EDIT ENTRY</div>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>FOOD NAME</label>
+              <input style={S.input} type="text" value={editFood.name} onChange={e => setEditFood(p => ({ ...p, name: e.target.value }))} />
             </div>
-          ))}
-        </>
+            <div style={S.twoCol}>
+              <div style={S.inputGroup}>
+                <label style={S.inputLabel}>CALORIES</label>
+                <input style={S.input} type="number" inputMode="numeric" value={editFood.calories} onChange={e => setEditFood(p => ({ ...p, calories: parseInt(e.target.value) || 0 }))} />
+              </div>
+              <div style={S.inputGroup}>
+                <label style={S.inputLabel}>PROTEIN (g)</label>
+                <input style={S.input} type="number" inputMode="numeric" value={editFood.protein} onChange={e => setEditFood(p => ({ ...p, protein: parseInt(e.target.value) || 0 }))} />
+              </div>
+            </div>
+            <div style={S.twoCol}>
+              <div style={S.inputGroup}>
+                <label style={S.inputLabel}>FAT (g)</label>
+                <input style={S.input} type="number" inputMode="numeric" value={editFood.fat} onChange={e => setEditFood(p => ({ ...p, fat: parseInt(e.target.value) || 0 }))} />
+              </div>
+              <div style={S.inputGroup}>
+                <label style={S.inputLabel}>CARBS (g)</label>
+                <input style={S.input} type="number" inputMode="numeric" value={editFood.carbs} onChange={e => setEditFood(p => ({ ...p, carbs: parseInt(e.target.value) || 0 }))} />
+              </div>
+            </div>
+            <button style={S.btn} onClick={handleSaveFood} disabled={modalSaving}>{modalSaving ? "SAVING..." : "SAVE"}</button>
+            <button style={{ ...S.btn, ...S.btnDanger, marginTop: 8 }} onClick={handleDeleteFood} disabled={modalSaving}>DELETE</button>
+            <button style={{ ...S.btn, background: "#1e293b", marginTop: 8 }} onClick={() => setEditFood(null)} disabled={modalSaving}>CANCEL</button>
+          </div>
+        </div>
       )}
-    </div>
+      {editWater && (
+        <div style={S.modalOverlay} onClick={() => setEditWater(null)}>
+          <div style={S.modal} onClick={e => e.stopPropagation()}>
+            <div style={S.modalTitle}>EDIT WATER</div>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>OZ</label>
+              <input style={S.input} type="number" inputMode="decimal" value={editWater.oz} onChange={e => setEditWater(p => ({ ...p, oz: parseFloat(e.target.value) || 0 }))} />
+            </div>
+            <button style={S.btn} onClick={handleSaveWater} disabled={modalSaving}>{modalSaving ? "SAVING..." : "SAVE"}</button>
+            <button style={{ ...S.btn, ...S.btnDanger, marginTop: 8 }} onClick={handleDeleteWater} disabled={modalSaving}>DELETE</button>
+            <button style={{ ...S.btn, background: "#1e293b", marginTop: 8 }} onClick={() => setEditWater(null)} disabled={modalSaving}>CANCEL</button>
+          </div>
+        </div>
+      )}
+      <div style={S.screen}>
+        <div style={S.sectionTitle}>🥩 FOOD LOG</div>
+        <div style={S.card}>
+          <div style={S.cardHeader}>
+            <span style={S.cardLabel}>TODAY</span>
+            <span style={S.cardLabelRight}>{todayCals} / {settings.calorieGoal} kcal</span>
+          </div>
+          <ProgressBar pct={calPct} color={calPct > 100 ? "#f87171" : "#38bdf8"} />
+          <div style={S.macroRow}>
+            <MacroPill label="P" val={todayProtein} goal={settings.macroGoals.protein} color="#a78bfa" />
+            <MacroPill label="F" val={todayFat} goal={settings.macroGoals.fat} color="#fb923c" />
+            <MacroPill label="C" val={todayCarbs} goal={settings.macroGoals.carbs} color="#34d399" />
+          </div>
+        </div>
+
+        <div style={S.card}>
+          <div style={S.cardHeader}>
+            <span style={S.cardLabel}>💧 WATER</span>
+            <span style={S.cardLabelRight}>{todayWater} / {settings.waterGoal || 100} oz</span>
+          </div>
+          <ProgressBar pct={Math.min((todayWater / (settings.waterGoal || 100)) * 100, 100)} color={todayWater >= (settings.waterGoal || 100) ? "#4ade80" : "#38bdf8"} />
+          <div style={S.waterBtns}>
+            {[8, 16, 24, 32].map(oz => (
+              <button key={oz} style={S.waterBtn} onClick={() => addWater(oz)}>+{oz}oz</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <input style={{ ...S.input, flex: 1, padding: "10px 12px" }} type="number" inputMode="decimal" placeholder="custom oz" value={customOz} onChange={e => setCustomOz(e.target.value)} />
+            <button style={{ ...S.waterBtn, flex: 0, padding: "10px 16px", whiteSpace: "nowrap" }} onClick={handleCustomWater}>ADD</button>
+          </div>
+          {todayWaterItems.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              {todayWaterItems.map(w => (
+                <div key={w.id} style={{ ...S.listItem, cursor: "pointer", marginBottom: 4 }} onClick={() => setEditWater({ ...w })} className="card-tap">
+                  <div style={S.listMain}>{w.oz}oz <span style={{ marginLeft: "auto", color: "#475569", fontSize: "0.85rem" }}>✏</span></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={S.sectionTitle}>🥩 ADD FOOD</div>
+        <div style={S.card}>
+          <div style={S.inputGroup}>
+            <label style={S.inputLabel}>FOOD NAME</label>
+            <input style={S.input} type="text" placeholder="Chicken breast, eggs..." value={name} onChange={e => setName(e.target.value)} />
+          </div>
+          <div style={S.twoCol}>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>CALORIES</label>
+              <input style={S.input} type="number" placeholder="kcal" value={cals} onChange={e => setCals(e.target.value)} inputMode="numeric" />
+            </div>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>PROTEIN (g)</label>
+              <input style={S.input} type="number" placeholder="g" value={protein} onChange={e => setProtein(e.target.value)} inputMode="numeric" />
+            </div>
+          </div>
+          <div style={S.twoCol}>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>FAT (g)</label>
+              <input style={S.input} type="number" placeholder="g" value={fat} onChange={e => setFat(e.target.value)} inputMode="numeric" />
+            </div>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>CARBS (g)</label>
+              <input style={S.input} type="number" placeholder="g" value={carbs} onChange={e => setCarbs(e.target.value)} inputMode="numeric" />
+            </div>
+          </div>
+          <button style={{ ...S.btn, ...(saved ? S.btnSuccess : {}) }} onClick={submit} disabled={saving}>
+            {saving ? "SAVING..." : saved ? "✓ LOGGED" : "ADD ENTRY"}
+          </button>
+        </div>
+
+        {todayItems.length > 0 && (
+          <>
+            <div style={S.sectionTitle}>TODAY'S ENTRIES</div>
+            {todayItems.map(f => (
+              <div key={f.id} style={{ ...S.listItem, cursor: "pointer" }} onClick={() => setEditFood({ ...f })} className="card-tap">
+                <div style={S.listMain}>{f.name} <span style={{ marginLeft: "auto", color: "#475569", fontSize: "0.85rem" }}>✏</span></div>
+                <div style={S.listSub}>{f.calories} kcal · P:{f.protein}g F:{f.fat}g C:{f.carbs}g</div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -724,7 +876,13 @@ function Trends({ rows, fasts, foodLogs, settings, activeFast }) {
   const calsByDay = last7.map(d => ({ date: d, val: foodLogs.filter(f => f.date === d).reduce((s, f) => s + f.calories, 0) }));
   const fastsByDay = last7.map(d => ({
     date: d,
-    val: fasts.filter(f => f.date === d).reduce((best, f) => {
+    val: fasts.filter(f => {
+      const end = new Date(parseInt(f.endTime));
+      const y = end.getFullYear();
+      const mo = String(end.getMonth() + 1).padStart(2, "0");
+      const dy = String(end.getDate()).padStart(2, "0");
+      return `${y}-${mo}-${dy}` === d;
+    }).reduce((best, f) => {
       const h = (parseInt(f.endTime) - parseInt(f.startTime)) / 3600000;
       return Math.max(best, h);
     }, 0),
@@ -877,6 +1035,10 @@ const S = {
   chartGoalLine: { position: "absolute", left: 0, right: 0, height: 1, background: "#334155", zIndex: 1 },
   chartDay: { fontSize: "0.7rem", color: "#94a3b8", fontWeight: 600 },
   chartVal: { fontSize: "0.65rem", fontWeight: 700 },
+
+  modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 },
+  modal: { background: "#16161a", border: "1px solid #252530", borderRadius: 14, padding: "24px 20px", width: "100%", maxWidth: 390, maxHeight: "90vh", overflowY: "auto" },
+  modalTitle: { fontSize: "0.85rem", letterSpacing: "0.12em", color: "#94a3b8", fontWeight: 700, marginBottom: 16 },
 
   nav: { position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "#0f0f11", borderTop: "1px solid #252530", display: "flex", padding: "10px 0 14px", zIndex: 100 },
   navBtn: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: "4px 0", opacity: 0.4 },
