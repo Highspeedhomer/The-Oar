@@ -175,8 +175,8 @@ function calcStreak(fasts) {
 
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 
-const NAV = ["Dashboard", "Row", "Fast", "Food", "Trends"];
-const NAV_ICONS = { Dashboard: "🏠", Row: "🚣", Fast: "🔥", Food: "🥩", Trends: "📈" };
+const NAV = ["Dashboard", "Row", "Fast", "Food", "Trends", "Settings"];
+const NAV_ICONS = { Dashboard: "🏠", Row: "🚣", Fast: "🔥", Food: "🥩", Trends: "📈", Settings: "⚙️" };
 
 export default function TheOar() {
   const [authState, setAuthState] = useState("idle"); // idle | signing_in | loading | ready | error
@@ -419,6 +419,7 @@ export default function TheOar() {
           {tab === "Fast" && <FastTracker activeFast={activeFast} fasts={fasts} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} startFast={startFast} endFast={endFast} updateFastStartTime={updateFastStartTime} />}
           {tab === "Food" && <FoodLog foodLogs={foodLogs} settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} addFood={addFood} todayWater={todayWater} addWater={addWater} sheetId={sheetId} updateFood={updateFood} deleteFood={deleteFood} waterLogs={waterLogs} updateWater={updateWater} deleteWater={deleteWater} />}
           {tab === "Trends" && <Trends rows={rows} fasts={fasts} foodLogs={foodLogs} settings={settings} activeFast={activeFast} />}
+          {tab === "Settings" && <SettingsScreen settings={settings} updateSettings={updateSettings} />}
         </div>
 
         <div style={S.nav}>
@@ -907,6 +908,71 @@ function Trends({ rows, fasts, foodLogs, settings, activeFast }) {
       <MiniChart label="METERS / DAY" items={metersByDay} color="#38bdf8" />
       <MiniChart label="CALORIES / DAY" items={calsByDay} color="#fb923c" goal={settings.calorieGoal} />
       <MiniChart label="FAST HOURS / DAY" items={fastsByDay} color="#4ade80" decimals={1} />
+    </div>
+  );
+}
+
+function SettingsScreen({ settings, updateSettings }) {
+  const [saving, setSaving] = useState({});
+
+  const handleChange = async (key, value) => {
+    setSaving(p => ({ ...p, [key]: true }));
+    await updateSettings(key, value);
+    setSaving(p => ({ ...p, [key]: false }));
+  };
+
+  const Field = ({ label, settingsKey, value }) => (
+    <div style={S.inputGroup}>
+      <label style={S.inputLabel}>{label}</label>
+      <input
+        style={{ ...S.input, opacity: saving[settingsKey] ? 0.5 : 1 }}
+        type="number"
+        inputMode="numeric"
+        defaultValue={value}
+        onBlur={e => {
+          const v = parseInt(e.target.value);
+          if (!isNaN(v) && v > 0) handleChange(settingsKey, v);
+        }}
+      />
+    </div>
+  );
+
+  return (
+    <div style={S.screen}>
+      <div style={S.sectionTitle}>⚙️ SETTINGS</div>
+
+      <div style={S.card}>
+        <div style={S.cardLabel}>CALORIES</div>
+        <div style={{ marginTop: 12 }}>
+          <Field label="DAILY CALORIE GOAL (kcal)" settingsKey="calorieGoal" value={settings.calorieGoal} />
+        </div>
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardLabel}>MACROS</div>
+        <div style={{ marginTop: 12 }}>
+          <Field label="PROTEIN GOAL (g)" settingsKey="proteinGoal" value={settings.macroGoals.protein} />
+          <Field label="FAT GOAL (g)" settingsKey="fatGoal" value={settings.macroGoals.fat} />
+          <Field label="CARBS GOAL (g)" settingsKey="carbsGoal" value={settings.macroGoals.carbs} />
+        </div>
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardLabel}>💧 WATER</div>
+        <div style={{ marginTop: 12 }}>
+          <Field label="DAILY WATER GOAL (oz)" settingsKey="waterGoal" value={settings.waterGoal || 100} />
+        </div>
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardLabel}>🔥 FASTING</div>
+        <div style={{ marginTop: 12 }}>
+          <Field label="WEEKDAY FAST HOURS" settingsKey="weekdayFastHours" value={settings.weekdayHours} />
+          <Field label="WEEKEND FAST HOURS" settingsKey="weekendFastHours" value={settings.weekendHours} />
+        </div>
+      </div>
+
+      <div style={{ ...S.cardSub, textAlign: "center", marginTop: 4 }}>Changes save automatically on blur.</div>
     </div>
   );
 }
