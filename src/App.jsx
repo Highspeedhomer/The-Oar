@@ -676,6 +676,7 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [customOz, setCustomOz] = useState("");
+  const [showWaterLog, setShowWaterLog] = useState(false);
   const [editFood, setEditFood] = useState(null);
   const [editWater, setEditWater] = useState(null);
   const [modalSaving, setModalSaving] = useState(false);
@@ -812,15 +813,6 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
             <input style={{ ...S.input, flex: 1, padding: "10px 12px" }} type="number" inputMode="decimal" placeholder="custom oz" value={customOz} onChange={e => setCustomOz(e.target.value)} />
             <button style={{ ...S.waterBtn, flex: 0, padding: "10px 16px", whiteSpace: "nowrap" }} onClick={handleCustomWater}>ADD</button>
           </div>
-          {todayWaterItems.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              {todayWaterItems.map(w => (
-                <div key={w.id} style={{ ...S.listItem, cursor: "pointer", marginBottom: 4 }} onClick={() => setEditWater({ ...w })} className="card-tap">
-                  <div style={S.listMain}>{w.oz}oz <span style={{ marginLeft: "auto", color: "#475569", fontSize: "0.85rem" }}>✏</span></div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         <div style={S.sectionTitle}>🥩 ADD FOOD</div>
@@ -861,6 +853,20 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
               <div key={f.id} style={{ ...S.listItem, cursor: "pointer" }} onClick={() => setEditFood({ ...f })} className="card-tap">
                 <div style={S.listMain}>{f.name} <span style={{ marginLeft: "auto", color: "#475569", fontSize: "0.85rem" }}>✏</span></div>
                 <div style={S.listSub}>{f.calories} kcal · P:{f.protein}g F:{f.fat}g C:{f.carbs}g</div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {todayWaterItems.length > 0 && (
+          <>
+            <div style={{ ...S.sectionTitle, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>💧 WATER LOG</span>
+              <button style={S.toggleBtn} onClick={() => setShowWaterLog(v => !v)}>{showWaterLog ? "HIDE" : "EDIT"}</button>
+            </div>
+            {showWaterLog && todayWaterItems.map(w => (
+              <div key={w.id} style={{ ...S.listItem, cursor: "pointer" }} onClick={() => setEditWater({ ...w })} className="card-tap">
+                <div style={S.listMain}>{w.oz}oz <span style={{ marginLeft: "auto", color: "#475569", fontSize: "0.85rem" }}>✏</span></div>
               </div>
             ))}
           </>
@@ -1035,6 +1041,8 @@ const S = {
   chartGoalLine: { position: "absolute", left: 0, right: 0, height: 1, background: "#334155", zIndex: 1 },
   chartDay: { fontSize: "0.7rem", color: "#94a3b8", fontWeight: 600 },
   chartVal: { fontSize: "0.65rem", fontWeight: 700 },
+
+  toggleBtn: { background: "none", border: "1px solid #334155", borderRadius: 6, padding: "3px 10px", color: "#94a3b8", fontSize: "0.7rem", letterSpacing: "0.08em", fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
 
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 },
   modal: { background: "#16161a", border: "1px solid #252530", borderRadius: 14, padding: "24px 20px", width: "100%", maxWidth: 390, maxHeight: "90vh", overflowY: "auto" },
