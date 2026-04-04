@@ -1,7 +1,7 @@
 {
   "name": "the-oar",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "homepage": "https://highspeedhomer.github.io/the-oar",
   "scripts": {

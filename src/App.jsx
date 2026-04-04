@@ -888,19 +888,29 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
     setSearchLoading(true);
     setSearchError("");
     setSearchResults([]);
-    try {
-      const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&api_key=${USDA_API_KEY}&pageSize=5&dataType=SR%20Legacy,Survey%20(FNDDS)`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (!data.foods || data.foods.length === 0) {
-        setSearchError("No results found.");
-      } else {
-        setSearchResults(data.foods.slice(0, 5));
+    const usdaUrl = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&api_key=${USDA_API_KEY}&pageSize=5&dataType=SR%20Legacy,Survey%20(FNDDS)`;
+    const proxies = [
+      `https://corsproxy.io/?${usdaUrl}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(usdaUrl)}`,
+    ];
+    let lastError = null;
+    for (const url of proxies) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data.foods || data.foods.length === 0) {
+          setSearchError("No results found.");
+        } else {
+          setSearchResults(data.foods.slice(0, 5));
+        }
+        lastError = null;
+        break;
+      } catch (e) {
+        lastError = e;
       }
-    } catch (e) {
-      setSearchError("Search failed. Check your connection and try again.");
     }
+    if (lastError) setSearchError("Search failed. Check your connection and try again.");
     setSearchLoading(false);
   };
 
