@@ -224,7 +224,10 @@ export default function TheOar() {
 
   // ── Actions ──
   const addWater = async (oz) => {
-    const { data } = await supabase.from("water").insert({ user_id: user.id, date: todayStr(), oz: parseFloat(oz) }).select().single();
+    const payload = { user_id: user.id, date: todayStr(), oz: parseFloat(oz) };
+    console.log("[TheOar] water insert payload:", JSON.stringify(payload));
+    const { data, error } = await supabase.from("water").insert(payload).select().single();
+    if (error) console.error("[TheOar] water insert error:", JSON.stringify(error));
     if (data) setWaterLogs(prev => [{ ...data, oz: parseFloat(data.oz) || 0 }, ...prev]);
   };
 
@@ -236,12 +239,15 @@ export default function TheOar() {
   const startFast = async () => {
     const goal = fastGoal;
     const startTime = Date.now();
-    const { data } = await supabase.from("fasts").insert({
+    const payload = {
       user_id: user.id,
       date: todayStr(),
       start_time: startTime,
       goal_hours: parseInt(goal, 10),
-    }).select().single();
+    };
+    console.log("[TheOar] fasts insert payload:", JSON.stringify(payload));
+    const { data, error } = await supabase.from("fasts").insert(payload).select().single();
+    if (error) console.error("[TheOar] fasts insert error:", JSON.stringify(error));
     if (data) setActiveFast({ startTime: data.start_time, goalHours: parseInt(data.goal_hours, 10), id: data.id });
   };
 
