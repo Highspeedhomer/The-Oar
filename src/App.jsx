@@ -73,20 +73,37 @@ export default function TheOar() {
 
   // Auth: check existing session on mount, subscribe to changes
   useEffect(() => {
+    const attemptLoad = async (userId) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          console.error("[TheOar] loadAllData timed out after 10s — forcing ready state");
+          loadingRef.current = false;
+          setAuthState("ready");
+        }
+      }, 10000);
+
+      try {
+        await loadAllData(userId);
+      } catch (e) {
+        console.error("[TheOar] unexpected error from loadAllData:", e);
+      } finally {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          setAuthState("ready");
+        }
+      }
+    };
+
     const initSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session && !loadingRef.current) {
         loadingRef.current = true;
         setUser(session.user);
         setAuthState("loading");
-        try {
-          await loadAllData(session.user.id);
-          setAuthState("ready");
-        } catch (e) {
-          setError("Failed to load data: " + e.message);
-          setAuthState("idle");
-          loadingRef.current = false;
-        }
+        await attemptLoad(session.user.id);
       }
     };
     initSession();
@@ -96,14 +113,7 @@ export default function TheOar() {
         loadingRef.current = true;
         setUser(session.user);
         setAuthState("loading");
-        try {
-          await loadAllData(session.user.id);
-          setAuthState("ready");
-        } catch (e) {
-          setError("Failed to load data: " + e.message);
-          setAuthState("idle");
-          loadingRef.current = false;
-        }
+        await attemptLoad(session.user.id);
       } else if (event === "SIGNED_OUT") {
         loadingRef.current = false;
         setUser(null);
@@ -130,64 +140,86 @@ export default function TheOar() {
   };
 
   const loadAllData = async (userId) => {
-    const [rowsRes, fastsRes, foodRes, waterRes, settingsRes] = await Promise.all([
-      supabase.from("rows").select("*").eq("user_id", userId).order("date", { ascending: false }),
-      supabase.from("fasts").select("*").eq("user_id", userId).order("date", { ascending: false }),
-      supabase.from("food_logs").select("*").eq("user_id", userId).order("date", { ascending: false }),
-      supabase.from("water").select("*").eq("user_id", userId).order("date", { ascending: false }),
-      supabase.from("settings").select("*").eq("user_id", userId).maybeSingle(),
-    ]);
+    console.log("[TheOar] loadAllData start, userId:", userId);
+    try {
+      const rowsRes = await supabase.from("rows").select("*").eq("user_id", userId).order("date", { ascending: false });
+      console.log("[TheOar] rows:", rowsRes.error ? rowsRes.error : `${(rowsRes.data || []).length} records`);
+      if (rowsRes.error) console.error("[TheOar] rows error:", rowsRes.error);
 
-    setRows((rowsRes.data || []).map(r => ({ ...r, meters: parseInt(r.meters) || 0 })));
+      const fastsRes = await supabase.from("fasts").select("*").eq("user_id", userId).order("date", { ascending: false });
+      console.log("[TheOar] fasts:", fastsRes.error ? fastsRes.error : `${(fastsRes.data || []).length} records`);
+      if (fastsRes.error) console.error("[TheOar] fasts error:", fastsRes.error);
 
-    const allFasts = (fastsRes.data || []).map(f => ({
-      ...f,
-      startTime: f.start_time,
-      endTime: f.end_time,
-      goalHours: parseInt(f.goal_hours) || 16,
-    }));
-    setFasts(allFasts.filter(f => f.end_time != null));
-    const activeFastRow = allFasts.find(f => f.end_time == null);
-    if (activeFastRow) {
-      setActiveFast({ startTime: activeFastRow.start_time, goalHours: activeFastRow.goal_hours, id: activeFastRow.id });
-    } else {
-      setActiveFast(null);
-    }
+      const foodRes = await supabase.from("food_logs").select("*").eq("user_id", userId).order("date", { ascending: false });
+      console.log("[TheOar] food_logs:", foodRes.error ? foodRes.error : `${(foodRes.data || []).length} records`);
+      if (foodRes.error) console.error("[TheOar] food_logs error:", foodRes.error);
 
-    setFoodLogs((foodRes.data || []).map(f => ({
-      ...f,
-      calories: parseInt(f.calories) || 0,
-      protein: parseInt(f.protein) || 0,
-      fat: parseInt(f.fat) || 0,
-      carbs: parseInt(f.carbs) || 0,
-    })));
+      const waterRes = await supabase.from("water").select("*").eq("user_id", userId).order("date", { ascending: false });
+      console.log("[TheOar] water:", waterRes.error ? waterRes.error : `${(waterRes.data || []).length} records`);
+      if (waterRes.error) console.error("[TheOar] water error:", waterRes.error);
 
-    setWaterLogs((waterRes.data || []).map(w => ({ ...w, oz: parseFloat(w.oz) || 0 })));
+      const settingsRes = await supabase.from("settings").select("*").eq("user_id", userId).maybeSingle();
+      console.log("[TheOar] settings:", settingsRes.error ? settingsRes.error : settingsRes.data);
+      if (settingsRes.error) console.error("[TheOar] settings error:", settingsRes.error);
 
-    const s = settingsRes.data;
-    if (s) {
-      setSettings({
-        calorieGoal: s.calorie_goal || 2000,
-        macroGoals: {
-          protein: s.protein_goal || 150,
-          fat: s.fat_goal || 80,
-          carbs: s.carbs_goal || 50,
-        },
-        weekdayHours: s.weekday_fast_hours || 20,
-        weekendHours: s.weekend_fast_hours || 16,
-        waterGoal: s.water_goal || 100,
-      });
-    } else {
-      await supabase.from("settings").insert({
-        user_id: userId,
-        calorie_goal: 2000,
-        protein_goal: 150,
-        fat_goal: 80,
-        carbs_goal: 50,
-        water_goal: 100,
-        weekday_fast_hours: 20,
-        weekend_fast_hours: 16,
-      });
+      setRows((rowsRes.data || []).map(r => ({ ...r, meters: parseInt(r.meters) || 0 })));
+
+      const allFasts = (fastsRes.data || []).map(f => ({
+        ...f,
+        startTime: f.start_time,
+        endTime: f.end_time,
+        goalHours: parseInt(f.goal_hours) || 16,
+      }));
+      setFasts(allFasts.filter(f => f.end_time != null));
+      const activeFastRow = allFasts.find(f => f.end_time == null);
+      if (activeFastRow) {
+        setActiveFast({ startTime: activeFastRow.start_time, goalHours: activeFastRow.goal_hours, id: activeFastRow.id });
+      } else {
+        setActiveFast(null);
+      }
+
+      setFoodLogs((foodRes.data || []).map(f => ({
+        ...f,
+        calories: parseInt(f.calories) || 0,
+        protein: parseInt(f.protein) || 0,
+        fat: parseInt(f.fat) || 0,
+        carbs: parseInt(f.carbs) || 0,
+      })));
+
+      setWaterLogs((waterRes.data || []).map(w => ({ ...w, oz: parseFloat(w.oz) || 0 })));
+
+      const s = settingsRes.data;
+      if (s) {
+        setSettings({
+          calorieGoal: s.calorie_goal || 2000,
+          macroGoals: {
+            protein: s.protein_goal || 150,
+            fat: s.fat_goal || 80,
+            carbs: s.carbs_goal || 50,
+          },
+          weekdayHours: s.weekday_fast_hours || 20,
+          weekendHours: s.weekend_fast_hours || 16,
+          waterGoal: s.water_goal || 100,
+        });
+      } else {
+        console.log("[TheOar] no settings row, inserting defaults");
+        const insRes = await supabase.from("settings").insert({
+          user_id: userId,
+          calorie_goal: 2000,
+          protein_goal: 150,
+          fat_goal: 80,
+          carbs_goal: 50,
+          water_goal: 100,
+          weekday_fast_hours: 20,
+          weekend_fast_hours: 16,
+        });
+        console.log("[TheOar] settings insert:", insRes.error || "ok");
+      }
+
+      console.log("[TheOar] loadAllData complete");
+    } catch (e) {
+      console.error("[TheOar] loadAllData threw:", e);
+      // Don't rethrow — caller will still set authState to ready with whatever data loaded
     }
   };
 
