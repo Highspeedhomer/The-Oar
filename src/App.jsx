@@ -4,7 +4,14 @@ import { createClient } from "@supabase/supabase-js";
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
 const supabase = createClient(
   "https://ukkdefiltqimuhovicnh.supabase.co",
-  "sb_publishable_M95B72z6nKinC_d--mviQg_avW34t1T"
+  "sb_publishable_M95B72z6nKinC_d--mviQg_avW34t1T",
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  }
 );
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -142,25 +149,33 @@ export default function TheOar() {
   const loadAllData = async (userId) => {
     console.log("[TheOar] loadAllData start, userId:", userId);
     try {
-      const rowsRes = await supabase.from("rows").select("*").eq("user_id", userId).order("date", { ascending: false });
-      console.log("[TheOar] rows:", rowsRes.error ? rowsRes.error : `${(rowsRes.data || []).length} records`);
-      if (rowsRes.error) console.error("[TheOar] rows error:", rowsRes.error);
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      console.log("[TheOar] session in loadAllData:", currentSession?.user?.id);
 
-      const fastsRes = await supabase.from("fasts").select("*").eq("user_id", userId).order("date", { ascending: false });
-      console.log("[TheOar] fasts:", fastsRes.error ? fastsRes.error : `${(fastsRes.data || []).length} records`);
-      if (fastsRes.error) console.error("[TheOar] fasts error:", fastsRes.error);
+      console.log("[TheOar] fetching rows...");
+      const { data: rowData, error: rowError } = await supabase.from("rows").select("*").eq("user_id", userId).order("date", { ascending: false });
+      console.log("[TheOar] rows result:", rowData, rowError);
+      const rowsRes = { data: rowData, error: rowError };
 
-      const foodRes = await supabase.from("food_logs").select("*").eq("user_id", userId).order("date", { ascending: false });
-      console.log("[TheOar] food_logs:", foodRes.error ? foodRes.error : `${(foodRes.data || []).length} records`);
-      if (foodRes.error) console.error("[TheOar] food_logs error:", foodRes.error);
+      console.log("[TheOar] fetching fasts...");
+      const { data: fastsData, error: fastsError } = await supabase.from("fasts").select("*").eq("user_id", userId).order("date", { ascending: false });
+      console.log("[TheOar] fasts result:", fastsData, fastsError);
+      const fastsRes = { data: fastsData, error: fastsError };
 
-      const waterRes = await supabase.from("water").select("*").eq("user_id", userId).order("date", { ascending: false });
-      console.log("[TheOar] water:", waterRes.error ? waterRes.error : `${(waterRes.data || []).length} records`);
-      if (waterRes.error) console.error("[TheOar] water error:", waterRes.error);
+      console.log("[TheOar] fetching food_logs...");
+      const { data: foodData, error: foodError } = await supabase.from("food_logs").select("*").eq("user_id", userId).order("date", { ascending: false });
+      console.log("[TheOar] food_logs result:", foodData, foodError);
+      const foodRes = { data: foodData, error: foodError };
 
-      const settingsRes = await supabase.from("settings").select("*").eq("user_id", userId).maybeSingle();
-      console.log("[TheOar] settings:", settingsRes.error ? settingsRes.error : settingsRes.data);
-      if (settingsRes.error) console.error("[TheOar] settings error:", settingsRes.error);
+      console.log("[TheOar] fetching water...");
+      const { data: waterData, error: waterError } = await supabase.from("water").select("*").eq("user_id", userId).order("date", { ascending: false });
+      console.log("[TheOar] water result:", waterData, waterError);
+      const waterRes = { data: waterData, error: waterError };
+
+      console.log("[TheOar] fetching settings...");
+      const { data: settingsData, error: settingsError } = await supabase.from("settings").select("*").eq("user_id", userId).maybeSingle();
+      console.log("[TheOar] settings result:", settingsData, settingsError);
+      const settingsRes = { data: settingsData, error: settingsError };
 
       setRows((rowsRes.data || []).map(r => ({ ...r, meters: parseInt(r.meters) || 0 })));
 
