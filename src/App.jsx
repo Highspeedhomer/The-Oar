@@ -21,6 +21,13 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 function isWeekend() { const d = new Date().getDay(); return d === 0 || d === 6; }
+function getFastGoal(startTime, weekdayHours, weekendHours) {
+  const defaultHours = isWeekend() ? weekendHours : weekdayHours;
+  const expectedEndTime = new Date((startTime || Date.now()) + defaultHours * 3600000);
+  const endDay = expectedEndTime.getDay();
+  const endIsWeekend = endDay === 0 || endDay === 6;
+  return endIsWeekend ? weekendHours : weekdayHours;
+}
 function formatDuration(ms) {
   const h = Math.floor(ms / 3600000);
   const m = Math.floor((ms % 3600000) / 60000);
@@ -210,7 +217,7 @@ export default function TheOar() {
   };
 
   // ── Computed ──
-  const fastGoal = isWeekend() ? settings.weekendHours : settings.weekdayHours;
+  const fastGoal = getFastGoal(activeFast?.startTime, settings.weekdayHours, settings.weekendHours);
   const fastElapsed = activeFast ? Date.now() - activeFast.startTime : 0;
   const fastPct = activeFast ? Math.min((fastElapsed / (fastGoal * 3600000)) * 100, 100) : 0;
   const fastDone = fastPct >= 100;
@@ -238,8 +245,8 @@ export default function TheOar() {
   };
 
   const startFast = async (customStartTime) => {
-    const goal = fastGoal;
     const startTime = customStartTime || Date.now();
+    const goal = getFastGoal(startTime, settings.weekdayHours, settings.weekendHours);
     const payload = {
       id: Date.now(),
       user_id: user.id,
