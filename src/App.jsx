@@ -14,6 +14,9 @@ const supabase = createClient(
   }
 );
 
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
+const USDA_API_KEY = "Q5xkAB5PaG0SF5MfY815LWi3V3iYuvyKUDiURCxF";
+
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 
 function todayStr() {
@@ -821,6 +824,10 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
   const [carbs, setCarbs] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
   const [customOz, setCustomOz] = useState("");
   const [showWaterLog, setShowWaterLog] = useState(false);
   const [editFood, setEditFood] = useState(null);
@@ -873,6 +880,49 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
     await deleteWater(editWater.id);
     setModalSaving(false);
     setEditWater(null);
+  };
+
+  const handleSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    setSearchLoading(true);
+    setSearchError("");
+    setSearchResults([]);
+    try {
+      const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&api_key=${USDA_API_KEY}&pageSize=5&dataType=SR%20Legacy,Survey%20(FNDDS)`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data.foods || data.foods.length === 0) {
+        setSearchError("No results found.");
+      } else {
+        setSearchResults(data.foods.slice(0, 5));
+      }
+    } catch (e) {
+      setSearchError("Search failed. Check your connection and try again.");
+    }
+    setSearchLoading(false);
+  };
+
+  const applySearchResult = (food) => {
+    const getNutrient = (id) => {
+      const n = (food.foodNutrients || []).find(n => n.nutrientId === id);
+      return n ? Math.round(n.value) : 0;
+    };
+    setName(food.description);
+    setCals(String(getNutrient(1008)));
+    setProtein(String(getNutrient(1003)));
+    setFat(String(getNutrient(1004)));
+    setCarbs(String(getNutrient(1005)));
+    setSearchResults([]);
+    setSearchQuery("");
+    setSearchError("");
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchError("");
   };
 
   const calPct = Math.min((todayCals / settings.calorieGoal) * 100, 100);
@@ -963,6 +1013,46 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
 
         <div style={S.sectionTitle}>🥩 ADD FOOD</div>
         <div style={S.card}>
+          <div style={S.inputGroup}>
+            <label style={S.inputLabel}>SEARCH USDA DATABASE</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                style={{ ...S.input, flex: 1 }}
+                type="text"
+                placeholder="Search foods..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleSearch()}
+              />
+              <button style={{ ...S.waterBtn, flex: 0, padding: "10px 14px", whiteSpace: "nowrap" }} onClick={handleSearch} disabled={searchLoading}>
+                {searchLoading ? "..." : "SEARCH"}
+              </button>
+              {(searchResults.length > 0 || searchError) && (
+                <button style={{ ...S.waterBtn, flex: 0, padding: "10px 14px", background: "#334155" }} onClick={clearSearch}>✕</button>
+              )}
+            </div>
+          </div>
+          {searchLoading && <div style={{ ...S.cardSub, textAlign: "center", marginBottom: 8 }}>Searching...</div>}
+          {searchError && <div style={{ ...S.cardSub, color: "#f87171", marginBottom: 8 }}>{searchError}</div>}
+          {searchResults.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              {searchResults.map((food, i) => {
+                const kcal = (food.foodNutrients || []).find(n => n.nutrientId === 1008);
+                return (
+                  <div
+                    key={i}
+                    style={{ ...S.listItem, cursor: "pointer", marginBottom: 4 }}
+                    onClick={() => applySearchResult(food)}
+                    className="card-tap"
+                  >
+                    <div style={S.listMain}>{food.description}</div>
+                    <div style={S.listSub}>{kcal ? `${Math.round(kcal.value)} kcal per 100g` : "Nutrition data unavailable"}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div style={{ ...S.cardSub, marginBottom: 12, borderTop: "1px solid #1e293b", paddingTop: 12 }}>MANUAL ENTRY</div>
           <div style={S.inputGroup}>
             <label style={S.inputLabel}>FOOD NAME</label>
             <input style={S.input} type="text" placeholder="Chicken breast, eggs..." value={name} onChange={e => setName(e.target.value)} />
