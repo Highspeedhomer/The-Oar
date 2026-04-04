@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
@@ -70,8 +70,6 @@ export default function TheOar() {
   const [waterLogs, setWaterLogs] = useState([]);
   const [activeFast, setActiveFast] = useState(null);
 
-  const loadingRef = useRef(false);
-
   // Live timer
   useEffect(() => {
     const t = setInterval(() => setTick(n => n + 1), 1000);
@@ -80,49 +78,20 @@ export default function TheOar() {
 
   // Auth: check existing session on mount, subscribe to changes
   useEffect(() => {
-    const attemptLoad = async (userId) => {
-      let settled = false;
-      const timeout = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          console.error("[TheOar] loadAllData timed out after 10s — forcing ready state");
-          loadingRef.current = false;
-          setAuthState("ready");
-        }
-      }, 10000);
-
-      try {
-        await loadAllData(userId);
-      } catch (e) {
-        console.error("[TheOar] unexpected error from loadAllData:", e);
-      } finally {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timeout);
-          setAuthState("ready");
-        }
-      }
-    };
-
-    const initSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session && !loadingRef.current) {
-        loadingRef.current = true;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
         setUser(session.user);
-        setAuthState("loading");
-        await attemptLoad(session.user.id);
+        loadAllData(session.user.id);
+      } else {
+        setAuthState("idle");
       }
-    };
-    initSession();
+    });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === "SIGNED_IN" && session && !loadingRef.current) {
-        loadingRef.current = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
         setUser(session.user);
-        setAuthState("loading");
-        await attemptLoad(session.user.id);
-      } else if (event === "SIGNED_OUT") {
-        loadingRef.current = false;
+        loadAllData(session.user.id);
+      } else {
         setUser(null);
         setAuthState("idle");
         setRows([]); setFasts([]); setFoodLogs([]); setWaterLogs([]);
@@ -148,6 +117,7 @@ export default function TheOar() {
 
   const loadAllData = async (userId) => {
     console.log("[TheOar] loadAllData start, userId:", userId);
+    setAuthState("loading");
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       console.log("[TheOar] session in loadAllData:", currentSession?.user?.id);
@@ -232,9 +202,10 @@ export default function TheOar() {
       }
 
       console.log("[TheOar] loadAllData complete");
+      setAuthState("ready");
     } catch (e) {
       console.error("[TheOar] loadAllData threw:", e);
-      // Don't rethrow — caller will still set authState to ready with whatever data loaded
+      setAuthState("ready");
     }
   };
 
