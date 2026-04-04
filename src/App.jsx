@@ -237,9 +237,9 @@ export default function TheOar() {
     if (data) setRows(prev => [{ ...data, meters: parseInt(data.meters) || 0 }, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
   };
 
-  const startFast = async () => {
+  const startFast = async (customStartTime) => {
     const goal = fastGoal;
-    const startTime = Date.now();
+    const startTime = customStartTime || Date.now();
     const payload = {
       id: Date.now(),
       user_id: user.id,
@@ -290,6 +290,40 @@ export default function TheOar() {
       fat: parseInt(data.fat) || 0,
       carbs: parseInt(data.carbs) || 0,
     }, ...prev]);
+  };
+
+  const updateRow = async (entry) => {
+    await supabase.from("rows").update({ meters: parseInt(entry.meters, 10), date: entry.date, notes: entry.notes }).eq("id", entry.id);
+    setRows(prev => prev.map(r => String(r.id) === String(entry.id) ? { ...r, ...entry, meters: parseInt(entry.meters, 10) } : r).sort((a, b) => b.date.localeCompare(a.date)));
+  };
+
+  const deleteRow = async (id) => {
+    await supabase.from("rows").delete().eq("id", id);
+    setRows(prev => prev.filter(r => String(r.id) !== String(id)));
+  };
+
+  const updateFast = async (entry) => {
+    await supabase.from("fasts").update({
+      date: entry.date,
+      start_time: entry.start_time,
+      end_time: entry.end_time,
+      goal_hours: parseInt(entry.goal_hours, 10),
+    }).eq("id", entry.id);
+    setFasts(prev => prev.map(f => String(f.id) === String(entry.id) ? {
+      ...f,
+      date: entry.date,
+      start_time: entry.start_time,
+      end_time: entry.end_time,
+      goal_hours: parseInt(entry.goal_hours, 10),
+      startTime: entry.start_time,
+      endTime: entry.end_time,
+      goalHours: parseInt(entry.goal_hours, 10),
+    } : f));
+  };
+
+  const deleteFast = async (id) => {
+    await supabase.from("fasts").delete().eq("id", id);
+    setFasts(prev => prev.filter(f => String(f.id) !== String(id)));
   };
 
   const updateFastStartTime = async (newTimestamp) => {
@@ -390,8 +424,8 @@ export default function TheOar() {
 
         <div style={S.content}>
           {tab === "Dashboard" && <Dashboard settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} weekMeters={weekMeters} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} activeFast={activeFast} rows={rows} setTab={setTab} todayWater={todayWater} addWater={addWater} />}
-          {tab === "Row" && <RowLog rows={rows} addRow={addRow} />}
-          {tab === "Fast" && <FastTracker activeFast={activeFast} fasts={fasts} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} startFast={startFast} endFast={endFast} updateFastStartTime={updateFastStartTime} />}
+          {tab === "Row" && <RowLog rows={rows} addRow={addRow} updateRow={updateRow} deleteRow={deleteRow} />}
+          {tab === "Fast" && <FastTracker activeFast={activeFast} fasts={fasts} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} startFast={startFast} endFast={endFast} updateFastStartTime={updateFastStartTime} updateFast={updateFast} deleteFast={deleteFast} />}
           {tab === "Food" && <FoodLog foodLogs={foodLogs} settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} addFood={addFood} todayWater={todayWater} addWater={addWater} updateFood={updateFood} deleteFood={deleteFood} waterLogs={waterLogs} updateWater={updateWater} deleteWater={deleteWater} />}
           {tab === "Trends" && <Trends rows={rows} fasts={fasts} foodLogs={foodLogs} settings={settings} activeFast={activeFast} waterLogs={waterLogs} />}
           {tab === "Settings" && <SettingsScreen settings={settings} updateSettings={updateSettings} signOut={signOut} />}
@@ -501,12 +535,14 @@ function Dashboard({ settings, todayCals, todayProtein, todayFat, todayCarbs, we
   );
 }
 
-function RowLog({ rows, addRow }) {
+function RowLog({ rows, addRow, updateRow, deleteRow }) {
   const [meters, setMeters] = useState("");
   const [notes, setNotes] = useState("");
   const [date, setDate] = useState(todayStr());
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [editRow, setEditRow] = useState(null);
+  const [modalSaving, setModalSaving] = useState(false);
 
   const submit = async () => {
     const m = parseInt(meters);
@@ -518,57 +554,120 @@ function RowLog({ rows, addRow }) {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  return (
-    <div style={S.screen}>
-      <div style={S.sectionTitle}>🚣 LOG A ROW</div>
-      <div style={S.card}>
-        <div style={S.twoCol}>
-          <div style={S.inputGroup}>
-            <label style={S.inputLabel}>METERS</label>
-            <input style={S.input} type="number" placeholder="e.g. 5000" value={meters} onChange={e => setMeters(e.target.value)} inputMode="numeric" />
-          </div>
-          <div style={S.inputGroup}>
-            <label style={S.inputLabel}>DATE</label>
-            <input style={{ ...S.input, colorScheme: "dark" }} type="date" value={date} onChange={e => setDate(e.target.value)} />
-          </div>
-        </div>
-        <div style={S.inputGroup}>
-          <label style={S.inputLabel}>NOTES (optional)</label>
-          <input style={S.input} type="text" placeholder="Steady state, intervals..." value={notes} onChange={e => setNotes(e.target.value)} />
-        </div>
-        <button style={{ ...S.btn, ...(saved ? S.btnSuccess : {}) }} onClick={submit} disabled={saving}>
-          {saving ? "SAVING..." : saved ? "✓ SAVED" : "LOG SESSION"}
-        </button>
-      </div>
+  const handleSaveRow = async () => {
+    if (!editRow.meters || parseInt(editRow.meters) < 1) return;
+    setModalSaving(true);
+    await updateRow(editRow);
+    setModalSaving(false);
+    setEditRow(null);
+  };
 
-      {rows.length > 0 && (
-        <>
-          <div style={S.sectionTitle}>HISTORY</div>
-          {rows.slice(0, 15).map(r => (
-            <div key={r.id} style={S.listItem}>
-              <div style={S.listMain}>{parseInt(r.meters).toLocaleString()}m</div>
-              <div style={S.listSub}>{r.date}{r.notes ? ` · ${r.notes}` : ""}</div>
+  const handleDeleteRow = async () => {
+    setModalSaving(true);
+    await deleteRow(editRow.id);
+    setModalSaving(false);
+    setEditRow(null);
+  };
+
+  return (
+    <>
+      {editRow && (
+        <div style={S.modalOverlay} onClick={() => setEditRow(null)}>
+          <div style={S.modal} onClick={e => e.stopPropagation()}>
+            <div style={S.modalTitle}>EDIT SESSION</div>
+            <div style={S.twoCol}>
+              <div style={S.inputGroup}>
+                <label style={S.inputLabel}>METERS</label>
+                <input style={S.input} type="number" inputMode="numeric" value={editRow.meters} onChange={e => setEditRow(p => ({ ...p, meters: parseInt(e.target.value) || 0 }))} />
+              </div>
+              <div style={S.inputGroup}>
+                <label style={S.inputLabel}>DATE</label>
+                <input style={{ ...S.input, colorScheme: "dark" }} type="date" value={editRow.date} onChange={e => setEditRow(p => ({ ...p, date: e.target.value }))} />
+              </div>
             </div>
-          ))}
-        </>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>NOTES (optional)</label>
+              <input style={S.input} type="text" value={editRow.notes || ""} onChange={e => setEditRow(p => ({ ...p, notes: e.target.value }))} />
+            </div>
+            <button style={S.btn} onClick={handleSaveRow} disabled={modalSaving}>{modalSaving ? "SAVING..." : "SAVE"}</button>
+            <button style={{ ...S.btn, ...S.btnDanger, marginTop: 8 }} onClick={handleDeleteRow} disabled={modalSaving}>DELETE</button>
+            <button style={{ ...S.btn, background: "#1e293b", marginTop: 8 }} onClick={() => setEditRow(null)} disabled={modalSaving}>CANCEL</button>
+          </div>
+        </div>
       )}
-    </div>
+      <div style={S.screen}>
+        <div style={S.sectionTitle}>🚣 LOG A ROW</div>
+        <div style={S.card}>
+          <div style={S.twoCol}>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>METERS</label>
+              <input style={S.input} type="number" placeholder="e.g. 5000" value={meters} onChange={e => setMeters(e.target.value)} inputMode="numeric" />
+            </div>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>DATE</label>
+              <input style={{ ...S.input, colorScheme: "dark" }} type="date" value={date} onChange={e => setDate(e.target.value)} />
+            </div>
+          </div>
+          <div style={S.inputGroup}>
+            <label style={S.inputLabel}>NOTES (optional)</label>
+            <input style={S.input} type="text" placeholder="Steady state, intervals..." value={notes} onChange={e => setNotes(e.target.value)} />
+          </div>
+          <button style={{ ...S.btn, ...(saved ? S.btnSuccess : {}) }} onClick={submit} disabled={saving}>
+            {saving ? "SAVING..." : saved ? "✓ SAVED" : "LOG SESSION"}
+          </button>
+        </div>
+
+        {rows.length > 0 && (
+          <>
+            <div style={S.sectionTitle}>HISTORY</div>
+            {rows.slice(0, 15).map(r => (
+              <div key={r.id} style={{ ...S.listItem, cursor: "pointer" }} onClick={() => setEditRow({ ...r })} className="card-tap">
+                <div style={S.listMain}>{parseInt(r.meters).toLocaleString()}m <span style={{ marginLeft: "auto", color: "#475569", fontSize: "0.85rem" }}>✏</span></div>
+                <div style={S.listSub}>{r.date}{r.notes ? ` · ${r.notes}` : ""}</div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
-function FastTracker({ activeFast, fasts, fastElapsed, fastGoal, fastPct, fastDone, startFast, endFast, updateFastStartTime }) {
+function FastTracker({ activeFast, fasts, fastElapsed, fastGoal, fastPct, fastDone, startFast, endFast, updateFastStartTime, updateFast, deleteFast }) {
   const [starting, setStarting] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [editFast, setEditFast] = useState(null);
+  const [modalSaving, setModalSaving] = useState(false);
   const streak = calcStreak(fasts);
 
-  const handleStart = async () => { setStarting(true); await startFast(); setStarting(false); };
+  const nowTimeStr = () => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+  const [customStartInput, setCustomStartInput] = useState(nowTimeStr);
+
+  const tsToTimeStr = (ts) => {
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+  const dateTimeToTs = (dateStr, timeStr) => {
+    const [h, m] = timeStr.split(":").map(Number);
+    const d = new Date(dateStr);
+    d.setHours(h, m, 0, 0);
+    return d.getTime();
+  };
+
+  const handleStart = async () => {
+    setStarting(true);
+    const [h, m] = customStartInput.split(":").map(Number);
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    await startFast(d.getTime());
+    setStarting(false);
+  };
   const handleEnd = async () => { setEnding(true); await endFast(); setEnding(false); };
 
-  const startTimeValue = activeFast ? (() => {
-    const d = new Date(activeFast.startTime);
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  })() : "";
-
+  const startTimeValue = activeFast ? tsToTimeStr(activeFast.startTime) : "";
   const handleStartTimeChange = (e) => {
     const [h, m] = e.target.value.split(":").map(Number);
     const d = new Date(activeFast.startTime);
@@ -576,70 +675,134 @@ function FastTracker({ activeFast, fasts, fastElapsed, fastGoal, fastPct, fastDo
     updateFastStartTime(d.getTime());
   };
 
+  const openEditFast = (f) => setEditFast({
+    ...f,
+    startTimeStr: tsToTimeStr(f.startTime),
+    endTimeStr: tsToTimeStr(f.endTime),
+    goalHoursStr: String(f.goalHours),
+  });
+
+  const handleSaveFast = async () => {
+    const newStartTime = dateTimeToTs(editFast.date, editFast.startTimeStr);
+    const newEndTime = dateTimeToTs(editFast.date, editFast.endTimeStr);
+    setModalSaving(true);
+    await updateFast({
+      ...editFast,
+      start_time: newStartTime,
+      end_time: newEndTime,
+      goal_hours: parseInt(editFast.goalHoursStr, 10) || editFast.goalHours,
+    });
+    setModalSaving(false);
+    setEditFast(null);
+  };
+
+  const handleDeleteFast = async () => {
+    setModalSaving(true);
+    await deleteFast(editFast.id);
+    setModalSaving(false);
+    setEditFast(null);
+  };
+
   return (
-    <div style={S.screen}>
-      <div style={S.sectionTitle}>🔥 FASTING</div>
-      <div style={S.card}>
-        <div style={S.cardHeader}>
-          <span style={S.cardLabel}>TARGET TODAY</span>
-          <span style={S.cardLabelRight}>{fastGoal}:00 · {isWeekend() ? "Weekend" : "Weekday"}</span>
+    <>
+      {editFast && (
+        <div style={S.modalOverlay} onClick={() => setEditFast(null)}>
+          <div style={S.modal} onClick={e => e.stopPropagation()}>
+            <div style={S.modalTitle}>EDIT FAST</div>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>DATE</label>
+              <input style={{ ...S.input, colorScheme: "dark" }} type="date" value={editFast.date} onChange={e => setEditFast(p => ({ ...p, date: e.target.value }))} />
+            </div>
+            <div style={S.twoCol}>
+              <div style={S.inputGroup}>
+                <label style={S.inputLabel}>START TIME</label>
+                <input style={{ ...S.input, colorScheme: "dark" }} type="time" value={editFast.startTimeStr} onChange={e => setEditFast(p => ({ ...p, startTimeStr: e.target.value }))} />
+              </div>
+              <div style={S.inputGroup}>
+                <label style={S.inputLabel}>END TIME</label>
+                <input style={{ ...S.input, colorScheme: "dark" }} type="time" value={editFast.endTimeStr} onChange={e => setEditFast(p => ({ ...p, endTimeStr: e.target.value }))} />
+              </div>
+            </div>
+            <div style={S.inputGroup}>
+              <label style={S.inputLabel}>GOAL HOURS</label>
+              <input style={S.input} type="number" inputMode="numeric" value={editFast.goalHoursStr} onChange={e => setEditFast(p => ({ ...p, goalHoursStr: e.target.value }))} />
+            </div>
+            <button style={S.btn} onClick={handleSaveFast} disabled={modalSaving}>{modalSaving ? "SAVING..." : "SAVE"}</button>
+            <button style={{ ...S.btn, ...S.btnDanger, marginTop: 8 }} onClick={handleDeleteFast} disabled={modalSaving}>DELETE</button>
+            <button style={{ ...S.btn, background: "#1e293b", marginTop: 8 }} onClick={() => setEditFast(null)} disabled={modalSaving}>CANCEL</button>
+          </div>
         </div>
-        {activeFast ? (
+      )}
+      <div style={S.screen}>
+        <div style={S.sectionTitle}>🔥 FASTING</div>
+        <div style={S.card}>
+          <div style={S.cardHeader}>
+            <span style={S.cardLabel}>TARGET TODAY</span>
+            <span style={S.cardLabelRight}>{fastGoal}:00 · {isWeekend() ? "Weekend" : "Weekday"}</span>
+          </div>
+          {activeFast ? (
+            <>
+              <div style={{ ...S.bigNum, fontSize: "2.8rem", textAlign: "center", letterSpacing: "0.05em" }}>
+                {formatDuration(fastElapsed)}
+              </div>
+              <div style={S.fastTimeRow}>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  🕐 Started
+                  <input
+                    type="time"
+                    value={startTimeValue}
+                    onChange={handleStartTimeChange}
+                    style={S.fastTimeInput}
+                  />
+                </span>
+                <span>🏁 Ends {new Date(activeFast.startTime + fastGoal * 3600000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</span>
+              </div>
+              <div style={{ ...S.cardSub, textAlign: "center", marginBottom: 12 }}>
+                {fastDone ? "🎯 Goal reached!" : `${((fastGoal * 3600000 - fastElapsed) / 3600000).toFixed(1)}h remaining`}
+              </div>
+              <ProgressBar pct={fastPct} color={fastDone ? "#4ade80" : "#f59e0b"} thick />
+              <button style={{ ...S.btn, ...S.btnDanger, marginTop: 16 }} onClick={handleEnd} disabled={ending}>
+                {ending ? "SAVING..." : "END FAST"}
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{ ...S.bigNumDim, textAlign: "center" }}>NOT STARTED</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <div style={S.inputGroup}>
+                  <label style={S.inputLabel}>START TIME</label>
+                  <input style={{ ...S.input, colorScheme: "dark" }} type="time" value={customStartInput} onChange={e => setCustomStartInput(e.target.value)} />
+                </div>
+              </div>
+              <button style={S.btn} onClick={handleStart} disabled={starting}>
+                {starting ? "STARTING..." : "START FAST"}
+              </button>
+            </>
+          )}
+        </div>
+
+        <div style={S.card}>
+          <div style={S.cardLabel}>STREAK</div>
+          <div style={S.bigNum}>{streak} <span style={{ fontSize: "1rem", color: "#64748b" }}>days</span></div>
+        </div>
+
+        {fasts.slice(0, 7).length > 0 && (
           <>
-            <div style={{ ...S.bigNum, fontSize: "2.8rem", textAlign: "center", letterSpacing: "0.05em" }}>
-              {formatDuration(fastElapsed)}
-            </div>
-            <div style={S.fastTimeRow}>
-              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                🕐 Started
-                <input
-                  type="time"
-                  value={startTimeValue}
-                  onChange={handleStartTimeChange}
-                  style={S.fastTimeInput}
-                />
-              </span>
-              <span>🏁 Ends {new Date(activeFast.startTime + fastGoal * 3600000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</span>
-            </div>
-            <div style={{ ...S.cardSub, textAlign: "center", marginBottom: 12 }}>
-              {fastDone ? "🎯 Goal reached!" : `${((fastGoal * 3600000 - fastElapsed) / 3600000).toFixed(1)}h remaining`}
-            </div>
-            <ProgressBar pct={fastPct} color={fastDone ? "#4ade80" : "#f59e0b"} thick />
-            <button style={{ ...S.btn, ...S.btnDanger, marginTop: 16 }} onClick={handleEnd} disabled={ending}>
-              {ending ? "SAVING..." : "END FAST"}
-            </button>
-          </>
-        ) : (
-          <>
-            <div style={{ ...S.bigNumDim, textAlign: "center" }}>NOT STARTED</div>
-            <button style={S.btn} onClick={handleStart} disabled={starting}>
-              {starting ? "STARTING..." : "START FAST"}
-            </button>
+            <div style={S.sectionTitle}>RECENT</div>
+            {fasts.slice(0, 7).map(f => {
+              const dur = (parseInt(f.endTime) - parseInt(f.startTime)) / 3600000;
+              const met = dur >= parseInt(f.goalHours);
+              return (
+                <div key={f.id} style={{ ...S.listItem, cursor: "pointer" }} onClick={() => openEditFast(f)} className="card-tap">
+                  <div style={S.listMain}>{dur.toFixed(1)}h <span style={{ ...S.pill, ...(met ? S.pillGreen : S.pillDim), marginLeft: 8 }}>{met ? "✓" : "—"}</span> <span style={{ marginLeft: "auto", color: "#475569", fontSize: "0.85rem" }}>✏</span></div>
+                  <div style={S.listSub}>{f.date} · goal {f.goalHours}h</div>
+                </div>
+              );
+            })}
           </>
         )}
       </div>
-
-      <div style={S.card}>
-        <div style={S.cardLabel}>STREAK</div>
-        <div style={S.bigNum}>{streak} <span style={{ fontSize: "1rem", color: "#64748b" }}>days</span></div>
-      </div>
-
-      {fasts.slice(0, 7).length > 0 && (
-        <>
-          <div style={S.sectionTitle}>RECENT</div>
-          {fasts.slice(0, 7).map(f => {
-            const dur = (parseInt(f.endTime) - parseInt(f.startTime)) / 3600000;
-            const met = dur >= parseInt(f.goalHours);
-            return (
-              <div key={f.id} style={S.listItem}>
-                <div style={S.listMain}>{dur.toFixed(1)}h <span style={{ ...S.pill, ...(met ? S.pillGreen : S.pillDim), marginLeft: 8 }}>{met ? "✓" : "—"}</span></div>
-                <div style={S.listSub}>{f.date} · goal {f.goalHours}h</div>
-              </div>
-            );
-          })}
-        </>
-      )}
-    </div>
+    </>
   );
 }
 
