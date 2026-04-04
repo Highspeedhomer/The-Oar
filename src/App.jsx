@@ -1170,6 +1170,8 @@ function SettingsScreen({ settings, updateSettings, signOut }) {
           SIGN OUT
         </button>
       </div>
+
+      <div style={{ ...S.cardSub, textAlign: "center", marginTop: 8, opacity: 0.4 }}>v{__APP_VERSION__}</div>
     </div>
   );
 }
