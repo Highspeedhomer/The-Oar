@@ -1,141 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-// ─── GOOGLE CLOUD OAUTH CLIENT ID ──────────────────────────────────────────
-const CLIENT_ID = "12992629640-tqgoerntbrt76l3g9unv85gfm2i7i2a1.apps.googleusercontent.com";
-// ───────────────────────────────────────────────────────────────────────────
-
-const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file";
-const SHEET_NAME = "TheOar";
-const TABS = { ROWS: "rows", FASTS: "fasts", FOOD: "food_logs", SETTINGS: "settings", WATER: "water" };
-
-// ─── GOOGLE API HELPERS ──────────────────────────────────────────────────────
-
-async function gapiRequest(method, url, body) {
-  const token = window.google_access_token;
-  const res = await fetch(url, {
-    method,
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  return res.json();
-}
-
-async function findOrCreateSheet(token) {
-  window.google_access_token = token;
-  // Search Drive for existing sheet
-  const search = await gapiRequest("GET",
-    `https://www.googleapis.com/drive/v3/files?q=name='${SHEET_NAME}'+and+mimeType='application/vnd.google-apps.spreadsheet'+and+trashed=false&fields=files(id,name)`
-  );
-  if (search.files?.length > 0) return search.files[0].id;
-
-  // Create new spreadsheet
-  const created = await gapiRequest("POST", "https://sheets.googleapis.com/v4/spreadsheets", {
-    properties: { title: SHEET_NAME },
-    sheets: [...Object.values(TABS)].map(t => ({ properties: { title: t } })),
-  });
-  const id = created.spreadsheetId;
-
-  // Write headers
-  const headers = {
-    [TABS.ROWS]: [["id", "date", "meters", "notes"]],
-    [TABS.FASTS]: [["id", "date", "startTime", "endTime", "goalHours"]],
-    [TABS.FOOD]: [["id", "date", "name", "calories", "protein", "fat", "carbs"]],
-    [TABS.SETTINGS]: [["key", "value"]],
-    [TABS.WATER]: [["id", "date", "oz"]],
-  };
-  const data = Object.entries(headers).map(([tab, values]) => ({
-    range: `${tab}!A1`,
-    values,
-  }));
-  await gapiRequest("POST", `https://sheets.googleapis.com/v4/spreadsheets/${id}/values:batchUpdate`, {
-    valueInputOption: "RAW",
-    data,
-  });
-
-  // Write default settings
-  await appendRows(id, TABS.SETTINGS, [
-    ["calorieGoal", "2000"],
-    ["proteinGoal", "150"],
-    ["fatGoal", "80"],
-    ["carbsGoal", "50"],
-    ["weekdayFastHours", "20"],
-    ["waterGoal", "100"],
-  ]);
-
-  return id;
-}
-
-async function appendRows(sheetId, tab, rows) {
-  await gapiRequest("POST",
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${tab}!A1:Z1000:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
-    { values: rows }
-  );
-}
-
-async function readTab(sheetId, tab) {
-  const res = await gapiRequest("GET",
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${tab}!A1:Z1000`
-  );
-  const rows = res.values || [];
-  if (rows.length < 2) return [];
-  const headers = rows[0];
-  return rows.slice(1).map(row => {
-    const obj = {};
-    headers.forEach((h, i) => obj[h] = row[i] || "");
-    return obj;
-  });
-}
-
-async function readSettings(sheetId) {
-  const rows = await readTab(sheetId, TABS.SETTINGS);
-  const s = {};
-  rows.forEach(r => s[r.key] = r.value);
-  return {
-    calorieGoal: parseInt(s.calorieGoal) || 2000,
-    macroGoals: {
-      protein: parseInt(s.proteinGoal) || 150,
-      fat: parseInt(s.fatGoal) || 80,
-      carbs: parseInt(s.carbsGoal) || 50,
-    },
-    weekdayHours: parseInt(s.weekdayFastHours) || 20,
-    weekendHours: parseInt(s.weekendFastHours) || 16,
-    waterGoal: parseInt(s.waterGoal) || 100,
-  };
-}
-
-async function updateSettingValue(sheetId, key, value) {
-  const res = await gapiRequest("GET",
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.SETTINGS}!A1:B100`
-  );
-  const rows = res.values || [];
-  const rowIdx = rows.findIndex(r => r[0] === key);
-  if (rowIdx >= 0) {
-    await gapiRequest("PUT",
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.SETTINGS}!B${rowIdx + 1}?valueInputOption=RAW`,
-      { values: [[String(value)]] }
-    );
-  } else {
-    await appendRows(sheetId, TABS.SETTINGS, [[key, String(value)]]);
-  }
-}
-
-async function deleteRowById(sheetId, sheetTitle, id) {
-  // Get sheet metadata to find sheetId number
-  const meta = await gapiRequest("GET", `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`);
-  const sheet = meta.sheets.find(s => s.properties.title === sheetTitle);
-  if (!sheet) return;
-  const gid = sheet.properties.sheetId;
-
-  const res = await gapiRequest("GET", `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetTitle}!A1:A1000`);
-  const rows = res.values || [];
-  const rowIdx = rows.findIndex(r => r[0] === String(id));
-  if (rowIdx < 1) return;
-
-  await gapiRequest("POST", `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
-    requests: [{ deleteDimension: { range: { sheetId: gid, dimension: "ROWS", startIndex: rowIdx, endIndex: rowIdx + 1 } } }]
-  });
-}
+// ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
+const supabase = createClient(
+  "https://ukkdefiltqimuhovicnh.supabase.co",
+  "sb_publishable_M95B72z6nKinC_d--mviQg_avW34t1T"
+);
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 
@@ -181,7 +51,6 @@ const NAV_ICONS = { Dashboard: "🏠", Row: "🚣", Fast: "🔥", Food: "🥩", 
 export default function TheOar() {
   const [authState, setAuthState] = useState("idle"); // idle | signing_in | loading | ready | error
   const [user, setUser] = useState(null);
-  const [sheetId, setSheetId] = useState(null);
   const [tab, setTab] = useState("Dashboard");
   const [tick, setTick] = useState(0);
   const [error, setError] = useState(null);
@@ -190,9 +59,11 @@ export default function TheOar() {
   const [rows, setRows] = useState([]);
   const [fasts, setFasts] = useState([]);
   const [foodLogs, setFoodLogs] = useState([]);
-  const [settings, setSettings] = useState({ calorieGoal: 2000, macroGoals: { protein: 150, fat: 80, carbs: 50 }, weekdayHours: 20, weekendHours: 16 });
+  const [settings, setSettings] = useState({ calorieGoal: 2000, macroGoals: { protein: 150, fat: 80, carbs: 50 }, weekdayHours: 20, weekendHours: 16, waterGoal: 100 });
   const [waterLogs, setWaterLogs] = useState([]);
-  const [activeFast, setActiveFast] = useState(null); // { startTime, goalHours }
+  const [activeFast, setActiveFast] = useState(null);
+
+  const loadingRef = useRef(false);
 
   // Live timer
   useEffect(() => {
@@ -200,59 +71,124 @@ export default function TheOar() {
     return () => clearInterval(t);
   }, []);
 
-  // Load GIS
+  // Auth: check existing session on mount, subscribe to changes
   useEffect(() => {
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    document.head.appendChild(script);
+    const initSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session && !loadingRef.current) {
+        loadingRef.current = true;
+        setUser(session.user);
+        setAuthState("loading");
+        try {
+          await loadAllData(session.user.id);
+          setAuthState("ready");
+        } catch (e) {
+          setError("Failed to load data: " + e.message);
+          setAuthState("idle");
+          loadingRef.current = false;
+        }
+      }
+    };
+    initSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" && session && !loadingRef.current) {
+        loadingRef.current = true;
+        setUser(session.user);
+        setAuthState("loading");
+        try {
+          await loadAllData(session.user.id);
+          setAuthState("ready");
+        } catch (e) {
+          setError("Failed to load data: " + e.message);
+          setAuthState("idle");
+          loadingRef.current = false;
+        }
+      } else if (event === "SIGNED_OUT") {
+        loadingRef.current = false;
+        setUser(null);
+        setAuthState("idle");
+        setRows([]); setFasts([]); setFoodLogs([]); setWaterLogs([]);
+        setActiveFast(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const signIn = () => {
     setAuthState("signing_in");
     setError(null);
-    const client = window.google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: async (resp) => {
-        if (resp.error) { setError("Sign-in failed: " + resp.error); setAuthState("idle"); return; }
-        window.google_access_token = resp.access_token;
-        setAuthState("loading");
-        try {
-          // Get user info
-          const me = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-            headers: { Authorization: `Bearer ${resp.access_token}` }
-          }).then(r => r.json());
-          setUser(me);
-          const id = await findOrCreateSheet(resp.access_token);
-          setSheetId(id);
-          await loadAllData(id);
-          setAuthState("ready");
-        } catch (e) {
-          setError("Failed to connect to Google Sheets: " + e.message);
-          setAuthState("idle");
-        }
-      },
+    supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: "https://highspeedhomer.github.io/the-oar/" },
     });
-    client.requestAccessToken();
   };
 
-  const loadAllData = async (id) => {
-    const [rowData, fastData, foodData, settingsData, waterData] = await Promise.all([
-      readTab(id, TABS.ROWS),
-      readTab(id, TABS.FASTS),
-      readTab(id, TABS.FOOD),
-      readSettings(id),
-      readTab(id, TABS.WATER),
+  const signOut = async () => {
+    await supabase.auth.signOut();
+  };
+
+  const loadAllData = async (userId) => {
+    const [rowsRes, fastsRes, foodRes, waterRes, settingsRes] = await Promise.all([
+      supabase.from("rows").select("*").eq("user_id", userId).order("date", { ascending: false }),
+      supabase.from("fasts").select("*").eq("user_id", userId).order("date", { ascending: false }),
+      supabase.from("food_logs").select("*").eq("user_id", userId).order("date", { ascending: false }),
+      supabase.from("water").select("*").eq("user_id", userId).order("date", { ascending: false }),
+      supabase.from("settings").select("*").eq("user_id", userId).maybeSingle(),
     ]);
-    setRows(rowData.map(r => ({ ...r, meters: parseInt(r.meters) || 0 })).reverse());
-    const completedFasts = fastData.filter(f => f.endTime).map(f => ({ ...f, goalHours: parseInt(f.goalHours) || 16 })).reverse();
-    const activeFastRow = fastData.find(f => !f.endTime);
-    setFasts(completedFasts);
-    if (activeFastRow) setActiveFast({ startTime: parseInt(activeFastRow.startTime), goalHours: parseInt(activeFastRow.goalHours), id: activeFastRow.id });
-    setFoodLogs(foodData.map(f => ({ ...f, calories: parseInt(f.calories) || 0, protein: parseInt(f.protein) || 0, fat: parseInt(f.fat) || 0, carbs: parseInt(f.carbs) || 0 })).reverse());
-    setWaterLogs(waterData.map(w => ({ ...w, oz: parseInt(w.oz) || 0 })).reverse());
-    setSettings(settingsData);
+
+    setRows((rowsRes.data || []).map(r => ({ ...r, meters: parseInt(r.meters) || 0 })));
+
+    const allFasts = (fastsRes.data || []).map(f => ({
+      ...f,
+      startTime: f.start_time,
+      endTime: f.end_time,
+      goalHours: parseInt(f.goal_hours) || 16,
+    }));
+    setFasts(allFasts.filter(f => f.end_time != null));
+    const activeFastRow = allFasts.find(f => f.end_time == null);
+    if (activeFastRow) {
+      setActiveFast({ startTime: activeFastRow.start_time, goalHours: activeFastRow.goal_hours, id: activeFastRow.id });
+    } else {
+      setActiveFast(null);
+    }
+
+    setFoodLogs((foodRes.data || []).map(f => ({
+      ...f,
+      calories: parseInt(f.calories) || 0,
+      protein: parseInt(f.protein) || 0,
+      fat: parseInt(f.fat) || 0,
+      carbs: parseInt(f.carbs) || 0,
+    })));
+
+    setWaterLogs((waterRes.data || []).map(w => ({ ...w, oz: parseFloat(w.oz) || 0 })));
+
+    const s = settingsRes.data;
+    if (s) {
+      setSettings({
+        calorieGoal: s.calorie_goal || 2000,
+        macroGoals: {
+          protein: s.protein_goal || 150,
+          fat: s.fat_goal || 80,
+          carbs: s.carbs_goal || 50,
+        },
+        weekdayHours: s.weekday_fast_hours || 20,
+        weekendHours: s.weekend_fast_hours || 16,
+        waterGoal: s.water_goal || 100,
+      });
+    } else {
+      await supabase.from("settings").insert({
+        user_id: userId,
+        calorie_goal: 2000,
+        protein_goal: 150,
+        fat_goal: 80,
+        carbs_goal: 50,
+        water_goal: 100,
+        weekday_fast_hours: 20,
+        weekend_fast_hours: 16,
+      });
+    }
   };
 
   // ── Computed ──
@@ -266,67 +202,88 @@ export default function TheOar() {
   const todayFat = todayFood.reduce((s, f) => s + f.fat, 0);
   const todayCarbs = todayFood.reduce((s, f) => s + f.carbs, 0);
   const weekMeters = rows.filter(r => { const diff = (new Date() - new Date(r.date)) / 86400000; return diff <= 7; }).reduce((s, r) => s + r.meters, 0);
-
   const todayWater = waterLogs.filter(w => w.date === todayStr()).reduce((s, w) => s + w.oz, 0);
 
   // ── Actions ──
   const addWater = async (oz) => {
-    const entry = { id: Date.now(), date: todayStr(), oz };
-    await appendRows(sheetId, TABS.WATER, [[entry.id, entry.date, entry.oz]]);
-    setWaterLogs(prev => [entry, ...prev]);
+    const { data } = await supabase.from("water").insert({ user_id: user.id, date: todayStr(), oz }).select().single();
+    if (data) setWaterLogs(prev => [{ ...data, oz: parseFloat(data.oz) || 0 }, ...prev]);
   };
 
   const addRow = async (meters, notes, date) => {
-    const entry = { id: Date.now(), date: date || todayStr(), meters, notes };
-    await appendRows(sheetId, TABS.ROWS, [[entry.id, entry.date, entry.meters, entry.notes]]);
-    setRows(prev => [entry, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
+    const { data } = await supabase.from("rows").insert({ user_id: user.id, date: date || todayStr(), meters, notes }).select().single();
+    if (data) setRows(prev => [{ ...data, meters: parseInt(data.meters) || 0 }, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
   };
 
   const startFast = async () => {
-    const id = Date.now();
     const goal = fastGoal;
-    await appendRows(sheetId, TABS.FASTS, [[id, todayStr(), id, "", goal]]);
-    setActiveFast({ startTime: id, goalHours: goal, id });
+    const startTime = Date.now();
+    const { data } = await supabase.from("fasts").insert({
+      user_id: user.id,
+      date: todayStr(),
+      start_time: startTime,
+      end_time: null,
+      goal_hours: goal,
+    }).select().single();
+    if (data) setActiveFast({ startTime: data.start_time, goalHours: data.goal_hours, id: data.id });
   };
 
   const endFast = async () => {
     if (!activeFast) return;
     const endTime = Date.now();
-    // Find the row and update it
-    const res = await gapiRequest("GET", `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.FASTS}!A1:F1000`);
-    const allRows = res.values || [];
-    const rowIdx = allRows.findIndex(r => r[0] === String(activeFast.id));
-    if (rowIdx >= 0) {
-      await gapiRequest("PUT",
-        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.FASTS}!D${rowIdx + 1}?valueInputOption=RAW`,
-        { values: [[String(endTime)]] }
-      );
-    }
-    const completed = { id: activeFast.id, date: todayStr(), startTime: activeFast.startTime, endTime, goalHours: activeFast.goalHours };
+    await supabase.from("fasts").update({ end_time: endTime }).eq("id", activeFast.id);
+    const completed = {
+      id: activeFast.id,
+      date: todayStr(),
+      startTime: activeFast.startTime,
+      endTime,
+      goalHours: activeFast.goalHours,
+      start_time: activeFast.startTime,
+      end_time: endTime,
+      goal_hours: activeFast.goalHours,
+    };
     setFasts(prev => [completed, ...prev]);
     setActiveFast(null);
   };
 
   const addFood = async (entry) => {
-    await appendRows(sheetId, TABS.FOOD, [[entry.id, entry.date, entry.name, entry.calories, entry.protein, entry.fat, entry.carbs]]);
-    setFoodLogs(prev => [entry, ...prev]);
+    const { data } = await supabase.from("food_logs").insert({
+      user_id: user.id,
+      date: entry.date,
+      name: entry.name,
+      calories: entry.calories,
+      protein: entry.protein,
+      fat: entry.fat,
+      carbs: entry.carbs,
+    }).select().single();
+    if (data) setFoodLogs(prev => [{
+      ...data,
+      calories: parseInt(data.calories) || 0,
+      protein: parseInt(data.protein) || 0,
+      fat: parseInt(data.fat) || 0,
+      carbs: parseInt(data.carbs) || 0,
+    }, ...prev]);
   };
 
   const updateFastStartTime = async (newTimestamp) => {
-    const res = await gapiRequest("GET", `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.FASTS}!A1:A1000`);
-    const allRows = res.values || [];
-    const rowIdx = allRows.findIndex(r => r[0] === String(activeFast.id));
-    if (rowIdx >= 0) {
-      await gapiRequest("PUT",
-        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.FASTS}!C${rowIdx + 1}?valueInputOption=RAW`,
-        { values: [[String(newTimestamp)]] }
-      );
-    }
+    await supabase.from("fasts").update({ start_time: newTimestamp }).eq("id", activeFast.id);
     setActiveFast(prev => ({ ...prev, startTime: newTimestamp }));
   };
 
   const updateSettings = async (key, value) => {
-    await updateSettingValue(sheetId, key, value);
+    const keyMap = {
+      calorieGoal: "calorie_goal",
+      proteinGoal: "protein_goal",
+      fatGoal: "fat_goal",
+      carbsGoal: "carbs_goal",
+      weekdayFastHours: "weekday_fast_hours",
+      weekendFastHours: "weekend_fast_hours",
+      waterGoal: "water_goal",
+    };
+    const col = keyMap[key];
+    if (col) {
+      await supabase.from("settings").upsert({ user_id: user.id, [col]: value }, { onConflict: "user_id" });
+    }
     setSettings(prev => {
       const next = { ...prev };
       if (key === "calorieGoal") next.calorieGoal = parseInt(value);
@@ -335,43 +292,34 @@ export default function TheOar() {
       if (key === "carbsGoal") next.macroGoals = { ...next.macroGoals, carbs: parseInt(value) };
       if (key === "weekdayFastHours") next.weekdayHours = parseInt(value);
       if (key === "weekendFastHours") next.weekendHours = parseInt(value);
+      if (key === "waterGoal") next.waterGoal = parseInt(value);
       return next;
     });
   };
 
   const updateFood = async (entry) => {
-    const res = await gapiRequest("GET", `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.FOOD}!A1:A1000`);
-    const allRows = res.values || [];
-    const rowIdx = allRows.findIndex(r => r[0] === String(entry.id));
-    if (rowIdx >= 0) {
-      await gapiRequest("PUT",
-        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.FOOD}!A${rowIdx + 1}:G${rowIdx + 1}?valueInputOption=RAW`,
-        { values: [[String(entry.id), entry.date, entry.name, String(entry.calories), String(entry.protein), String(entry.fat), String(entry.carbs)]] }
-      );
-    }
+    await supabase.from("food_logs").update({
+      name: entry.name,
+      calories: entry.calories,
+      protein: entry.protein,
+      fat: entry.fat,
+      carbs: entry.carbs,
+    }).eq("id", entry.id);
     setFoodLogs(prev => prev.map(f => String(f.id) === String(entry.id) ? entry : f));
   };
 
   const deleteFood = async (id) => {
-    await deleteRowById(sheetId, TABS.FOOD, id);
+    await supabase.from("food_logs").delete().eq("id", id);
     setFoodLogs(prev => prev.filter(f => String(f.id) !== String(id)));
   };
 
   const updateWater = async (entry) => {
-    const res = await gapiRequest("GET", `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.WATER}!A1:A1000`);
-    const allRows = res.values || [];
-    const rowIdx = allRows.findIndex(r => r[0] === String(entry.id));
-    if (rowIdx >= 0) {
-      await gapiRequest("PUT",
-        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${TABS.WATER}!A${rowIdx + 1}:C${rowIdx + 1}?valueInputOption=RAW`,
-        { values: [[String(entry.id), entry.date, String(entry.oz)]] }
-      );
-    }
+    await supabase.from("water").update({ oz: entry.oz }).eq("id", entry.id);
     setWaterLogs(prev => prev.map(w => String(w.id) === String(entry.id) ? entry : w));
   };
 
   const deleteWater = async (id) => {
-    await deleteRowById(sheetId, TABS.WATER, id);
+    await supabase.from("water").delete().eq("id", id);
     setWaterLogs(prev => prev.filter(w => String(w.id) !== String(id)));
   };
 
@@ -384,15 +332,15 @@ export default function TheOar() {
         <div style={S.authScreen}>
           <div style={S.authLogo}>THE OAR</div>
           <div style={S.authTagline}>row · fast · fuel</div>
-          {authState === "loading" && <div style={S.authLoading}><Spinner /> connecting to sheets...</div>}
-          {authState === "signing_in" && <div style={S.authLoading}><Spinner /> waiting for google...</div>}
+          {authState === "loading" && <div style={S.authLoading}><Spinner /> loading your data...</div>}
+          {authState === "signing_in" && <div style={S.authLoading}><Spinner /> redirecting to Google...</div>}
           {authState === "idle" && (
             <button style={S.authBtn} onClick={signIn}>
               <span style={{ fontSize: "1.1rem" }}>G</span> Sign in with Google
             </button>
           )}
           {error && <div style={S.authError}>{error}</div>}
-          <div style={S.authNote}>Your data lives in a private Google Sheet in your Drive. Nothing is shared.</div>
+          <div style={S.authNote}>Your data is stored securely in the cloud. Sign in to continue.</div>
         </div>
       </div>
     );
@@ -409,7 +357,7 @@ export default function TheOar() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={S.headerSub}>{new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>
-            {user?.picture && <img src={user.picture} style={S.avatar} alt="avatar" />}
+            {user?.user_metadata?.avatar_url && <img src={user.user_metadata.avatar_url} style={S.avatar} alt="avatar" />}
           </div>
         </div>
 
@@ -417,9 +365,9 @@ export default function TheOar() {
           {tab === "Dashboard" && <Dashboard settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} weekMeters={weekMeters} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} activeFast={activeFast} rows={rows} setTab={setTab} todayWater={todayWater} addWater={addWater} />}
           {tab === "Row" && <RowLog rows={rows} addRow={addRow} />}
           {tab === "Fast" && <FastTracker activeFast={activeFast} fasts={fasts} fastElapsed={fastElapsed} fastGoal={fastGoal} fastPct={fastPct} fastDone={fastDone} startFast={startFast} endFast={endFast} updateFastStartTime={updateFastStartTime} />}
-          {tab === "Food" && <FoodLog foodLogs={foodLogs} settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} addFood={addFood} todayWater={todayWater} addWater={addWater} sheetId={sheetId} updateFood={updateFood} deleteFood={deleteFood} waterLogs={waterLogs} updateWater={updateWater} deleteWater={deleteWater} />}
+          {tab === "Food" && <FoodLog foodLogs={foodLogs} settings={settings} todayCals={todayCals} todayProtein={todayProtein} todayFat={todayFat} todayCarbs={todayCarbs} addFood={addFood} todayWater={todayWater} addWater={addWater} updateFood={updateFood} deleteFood={deleteFood} waterLogs={waterLogs} updateWater={updateWater} deleteWater={deleteWater} />}
           {tab === "Trends" && <Trends rows={rows} fasts={fasts} foodLogs={foodLogs} settings={settings} activeFast={activeFast} waterLogs={waterLogs} />}
-          {tab === "Settings" && <SettingsScreen settings={settings} updateSettings={updateSettings} />}
+          {tab === "Settings" && <SettingsScreen settings={settings} updateSettings={updateSettings} signOut={signOut} />}
         </div>
 
         <div style={S.nav}>
@@ -668,7 +616,7 @@ function FastTracker({ activeFast, fasts, fastElapsed, fastGoal, fastPct, fastDo
   );
 }
 
-function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayCarbs, addFood, todayWater, addWater, sheetId, updateFood, deleteFood, waterLogs, updateWater, deleteWater }) {
+function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayCarbs, addFood, todayWater, addWater, updateFood, deleteFood, waterLogs, updateWater, deleteWater }) {
   const [name, setName] = useState("");
   const [cals, setCals] = useState("");
   const [protein, setProtein] = useState("");
@@ -958,7 +906,7 @@ function Trends({ rows, fasts, foodLogs, settings, activeFast, waterLogs }) {
   );
 }
 
-function SettingsScreen({ settings, updateSettings }) {
+function SettingsScreen({ settings, updateSettings, signOut }) {
   const [saving, setSaving] = useState({});
 
   const handleChange = async (key, value) => {
@@ -1019,6 +967,12 @@ function SettingsScreen({ settings, updateSettings }) {
       </div>
 
       <div style={{ ...S.cardSub, textAlign: "center", marginTop: 4 }}>Changes save automatically on blur.</div>
+
+      <div style={S.card}>
+        <button style={{ ...S.btn, background: "#1e293b", border: "1px solid #334155" }} onClick={signOut}>
+          SIGN OUT
+        </button>
+      </div>
     </div>
   );
 }
