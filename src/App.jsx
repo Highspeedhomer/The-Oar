@@ -206,12 +206,12 @@ export default function TheOar() {
 
   // ── Actions ──
   const addWater = async (oz) => {
-    const { data } = await supabase.from("water").insert({ user_id: user.id, date: todayStr(), oz }).select().single();
+    const { data } = await supabase.from("water").insert({ user_id: user.id, date: todayStr(), oz: parseFloat(oz) }).select().single();
     if (data) setWaterLogs(prev => [{ ...data, oz: parseFloat(data.oz) || 0 }, ...prev]);
   };
 
   const addRow = async (meters, notes, date) => {
-    const { data } = await supabase.from("rows").insert({ user_id: user.id, date: date || todayStr(), meters, notes }).select().single();
+    const { data } = await supabase.from("rows").insert({ user_id: user.id, date: date || todayStr(), meters: parseInt(meters, 10), notes }).select().single();
     if (data) setRows(prev => [{ ...data, meters: parseInt(data.meters) || 0 }, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
   };
 
@@ -222,10 +222,9 @@ export default function TheOar() {
       user_id: user.id,
       date: todayStr(),
       start_time: startTime,
-      end_time: null,
-      goal_hours: goal,
+      goal_hours: parseInt(goal, 10),
     }).select().single();
-    if (data) setActiveFast({ startTime: data.start_time, goalHours: data.goal_hours, id: data.id });
+    if (data) setActiveFast({ startTime: data.start_time, goalHours: parseInt(data.goal_hours, 10), id: data.id });
   };
 
   const endFast = async () => {
@@ -251,10 +250,10 @@ export default function TheOar() {
       user_id: user.id,
       date: entry.date,
       name: entry.name,
-      calories: entry.calories,
-      protein: entry.protein,
-      fat: entry.fat,
-      carbs: entry.carbs,
+      calories: parseInt(entry.calories, 10),
+      protein: parseInt(entry.protein, 10),
+      fat: parseInt(entry.fat, 10),
+      carbs: parseInt(entry.carbs, 10),
     }).select().single();
     if (data) setFoodLogs(prev => [{
       ...data,
@@ -282,7 +281,7 @@ export default function TheOar() {
     };
     const col = keyMap[key];
     if (col) {
-      await supabase.from("settings").upsert({ user_id: user.id, [col]: value }, { onConflict: "user_id" });
+      await supabase.from("settings").upsert({ user_id: user.id, [col]: parseInt(value, 10) }, { onConflict: "user_id" });
     }
     setSettings(prev => {
       const next = { ...prev };
@@ -300,10 +299,10 @@ export default function TheOar() {
   const updateFood = async (entry) => {
     await supabase.from("food_logs").update({
       name: entry.name,
-      calories: entry.calories,
-      protein: entry.protein,
-      fat: entry.fat,
-      carbs: entry.carbs,
+      calories: parseInt(entry.calories, 10),
+      protein: parseInt(entry.protein, 10),
+      fat: parseInt(entry.fat, 10),
+      carbs: parseInt(entry.carbs, 10),
     }).eq("id", entry.id);
     setFoodLogs(prev => prev.map(f => String(f.id) === String(entry.id) ? entry : f));
   };
@@ -314,7 +313,7 @@ export default function TheOar() {
   };
 
   const updateWater = async (entry) => {
-    await supabase.from("water").update({ oz: entry.oz }).eq("id", entry.id);
+    await supabase.from("water").update({ oz: parseFloat(entry.oz) }).eq("id", entry.id);
     setWaterLogs(prev => prev.map(w => String(w.id) === String(entry.id) ? entry : w));
   };
 
