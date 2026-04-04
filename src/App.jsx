@@ -224,15 +224,16 @@ export default function TheOar() {
 
   // ── Actions ──
   const addWater = async (oz) => {
-    const payload = { user_id: user.id, date: todayStr(), oz: parseFloat(oz) };
+    const payload = { id: Date.now(), user_id: user.id, date: todayStr(), oz: parseInt(oz, 10) };
     console.log("[TheOar] water insert payload:", JSON.stringify(payload));
     const { data, error } = await supabase.from("water").insert(payload).select().single();
     if (error) console.error("[TheOar] water insert error:", JSON.stringify(error));
-    if (data) setWaterLogs(prev => [{ ...data, oz: parseFloat(data.oz) || 0 }, ...prev]);
+    if (data) setWaterLogs(prev => [{ ...data, oz: parseInt(data.oz) || 0 }, ...prev]);
   };
 
   const addRow = async (meters, notes, date) => {
-    const { data } = await supabase.from("rows").insert({ user_id: user.id, date: date || todayStr(), meters: parseInt(meters, 10), notes }).select().single();
+    const { data, error } = await supabase.from("rows").insert({ id: Date.now(), user_id: user.id, date: date || todayStr(), meters: parseInt(meters, 10), notes }).select().single();
+    if (error) console.error("[TheOar] rows insert error:", JSON.stringify(error));
     if (data) setRows(prev => [{ ...data, meters: parseInt(data.meters) || 0 }, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
   };
 
@@ -240,6 +241,7 @@ export default function TheOar() {
     const goal = fastGoal;
     const startTime = Date.now();
     const payload = {
+      id: Date.now(),
       user_id: user.id,
       date: todayStr(),
       start_time: startTime,
@@ -270,7 +272,8 @@ export default function TheOar() {
   };
 
   const addFood = async (entry) => {
-    const { data } = await supabase.from("food_logs").insert({
+    const { data, error } = await supabase.from("food_logs").insert({
+      id: Date.now(),
       user_id: user.id,
       date: entry.date,
       name: entry.name,
@@ -279,6 +282,7 @@ export default function TheOar() {
       fat: parseInt(entry.fat, 10),
       carbs: parseInt(entry.carbs, 10),
     }).select().single();
+    if (error) console.error("[TheOar] food_logs insert error:", JSON.stringify(error));
     if (data) setFoodLogs(prev => [{
       ...data,
       calories: parseInt(data.calories) || 0,
