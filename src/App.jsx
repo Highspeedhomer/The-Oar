@@ -828,6 +828,9 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState("");
+  const [selectedFood, setSelectedFood] = useState(null);
+  const [customPortionQty, setCustomPortionQty] = useState("");
+  const [customPortionUnit, setCustomPortionUnit] = useState("g");
   const [customOz, setCustomOz] = useState("");
   const [showWaterLog, setShowWaterLog] = useState(false);
   const [editFood, setEditFood] = useState(null);
@@ -914,25 +917,57 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
     setSearchLoading(false);
   };
 
-  const applySearchResult = (food) => {
-    const getNutrient = (id) => {
-      const n = (food.foodNutrients || []).find(n => n.nutrientId === id);
-      return n ? Math.round(n.value) : 0;
-    };
-    setName(food.description);
-    setCals(String(getNutrient(1008)));
-    setProtein(String(getNutrient(1003)));
-    setFat(String(getNutrient(1004)));
-    setCarbs(String(getNutrient(1005)));
+  const UNIT_TO_GRAMS = { g: 1, oz: 28.35, tbsp: 15, tsp: 5, cup: 240 };
+
+  const PRESET_PORTIONS = [
+    { label: "1 tbsp", grams: 15 },
+    { label: "2 tbsp", grams: 30 },
+    { label: "1/4 cup", grams: 60 },
+    { label: "1/2 cup", grams: 120 },
+    { label: "1 cup", grams: 240 },
+    { label: "1 oz", grams: 28.35 },
+    { label: "2 oz", grams: 56.7 },
+    { label: "4 oz", grams: 113.4 },
+    { label: "6 oz", grams: 170.1 },
+    { label: "8 oz", grams: 226.8 },
+  ];
+
+  const selectFood = (food) => {
+    setSelectedFood(food);
     setSearchResults([]);
     setSearchQuery("");
     setSearchError("");
+    setCustomPortionQty("");
+    setCustomPortionUnit("g");
+  };
+
+  const applyPortion = (food, grams, portionLabel) => {
+    const scale = grams / 100;
+    const get = (id) => {
+      const n = (food.foodNutrients || []).find(n => n.nutrientId === id);
+      return n ? Math.round(n.value * scale) : 0;
+    };
+    setName(`${food.description} (${portionLabel})`);
+    setCals(String(get(1008)));
+    setProtein(String(get(1003)));
+    setFat(String(get(1004)));
+    setCarbs(String(get(1005)));
+    setSelectedFood(null);
+  };
+
+  const applyCustomPortion = () => {
+    const qty = parseFloat(customPortionQty);
+    if (!qty || qty <= 0 || !selectedFood) return;
+    const grams = qty * (UNIT_TO_GRAMS[customPortionUnit] || 1);
+    const label = `${customPortionQty} ${customPortionUnit}`;
+    applyPortion(selectedFood, grams, label);
   };
 
   const clearSearch = () => {
     setSearchQuery("");
     setSearchResults([]);
     setSearchError("");
+    setSelectedFood(null);
   };
 
   const calPct = Math.min((todayCals / settings.calorieGoal) * 100, 100);
@@ -1052,7 +1087,7 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
                   <div
                     key={i}
                     style={{ ...S.listItem, cursor: "pointer", marginBottom: 4 }}
-                    onClick={() => applySearchResult(food)}
+                    onClick={() => selectFood(food)}
                     className="card-tap"
                   >
                     <div style={S.listMain}>{food.description}</div>
@@ -1060,6 +1095,50 @@ function FoodLog({ foodLogs, settings, todayCals, todayProtein, todayFat, todayC
                   </div>
                 );
               })}
+            </div>
+          )}
+          {selectedFood && (
+            <div style={{ marginBottom: 12, background: "#0f172a", borderRadius: 10, padding: 12 }}>
+              <div style={{ ...S.cardLabel, marginBottom: 8 }}>PORTION SIZE FOR: {selectedFood.description}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                {PRESET_PORTIONS.map(({ label, grams }) => (
+                  <button
+                    key={label}
+                    style={{ ...S.waterBtn, padding: "8px 12px", fontSize: "0.8rem" }}
+                    onClick={() => applyPortion(selectedFood, grams, label)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  style={{ ...S.input, flex: 1, padding: "10px 12px" }}
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="Amount"
+                  value={customPortionQty}
+                  onChange={e => setCustomPortionQty(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && applyCustomPortion()}
+                />
+                <select
+                  style={{ ...S.input, width: "auto", padding: "10px 8px", colorScheme: "dark" }}
+                  value={customPortionUnit}
+                  onChange={e => setCustomPortionUnit(e.target.value)}
+                >
+                  {["g", "oz", "tbsp", "tsp", "cup"].map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+                <button
+                  style={{ ...S.waterBtn, flex: 0, padding: "10px 14px", whiteSpace: "nowrap" }}
+                  onClick={applyCustomPortion}
+                  disabled={!customPortionQty || parseFloat(customPortionQty) <= 0}
+                >
+                  USE
+                </button>
+              </div>
+              <button style={{ ...S.cardSub, background: "none", border: "none", color: "#64748b", marginTop: 8, cursor: "pointer", padding: 0 }} onClick={() => setSelectedFood(null)}>
+                Cancel
+              </button>
             </div>
           )}
           <div style={{ ...S.cardSub, marginBottom: 12, borderTop: "1px solid #1e293b", paddingTop: 12 }}>MANUAL ENTRY</div>
