@@ -121,7 +121,7 @@ export default function TheOar() {
     setError(null);
     supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: "https://highspeedhomer.github.io/the-oar/" },
+      options: { redirectTo: window.location.origin + "/the-oar/" },
     });
   };
 
