@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Claude context (local only)
+CLAUDE.md
+
+# Local docs
+the-oar-summary*
